@@ -4,9 +4,9 @@ use Illuminate\Support\Facades\Route;
 use RouterOS\Client;
 use App\Services\MikrotikService;
 use App\Services\TrafficDetectionService;
+use App\Services\ImportanceEngineService;
 use App\Models\Flow;
 use App\Models\User;
-
 
 Route::get('/test-mikrotik', function (MikrotikService $mikrotik) {
     return $mikrotik->testConnection();
@@ -79,4 +79,28 @@ Route::get('/detect-traffic', function (
     }
 
     return "Traffic analyzed successfully";
+});
+
+
+Route::get('/calculate-importance', function (
+    ImportanceEngineService $engine
+) {
+
+    $flows = Flow::with('user')->get();
+
+    foreach ($flows as $flow) {
+
+        $score = $engine->calculate(
+            $flow->user->role,
+            $flow->classification,
+            $flow->urgency_weight
+        );
+
+        $flow->importance_score = $score;
+        $flow->save();
+    }
+
+    return Flow::with('user')
+        ->orderByDesc('importance_score')
+        ->get();
 });

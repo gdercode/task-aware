@@ -14,7 +14,10 @@ class Flow extends Model
         'destination',
         'classification',
         'bytes',
+        'urgency_weight',
+        'importance_score',
     ];
+
 
     public function user()
     {
