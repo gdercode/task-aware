@@ -40,4 +40,36 @@ class MikrotikService
             ->read();
     }
 
+    public function updateQueue($name, $target, $maxLimit)
+    {
+        // Find existing queue
+        $queues = $this->client
+            ->query('/queue/simple/print')
+            ->read();
+
+        $queueId = null;
+
+        foreach ($queues as $queue) {
+            if (($queue['name'] ?? '') === $name) {
+                $queueId = $queue['.id'];
+                break;
+            }
+        }
+
+        // Update existing queue
+        if ($queueId) {
+
+            $query = new \RouterOS\Query('/queue/simple/set');
+
+            $query->equal('.id', $queueId);
+            $query->equal('max-limit', $maxLimit);
+
+            return $this->client->query($query)->read();
+        }
+
+        // Create queue if not exists
+        return $this->createQueue($name, $target, $maxLimit);
+    }
+
+
 }

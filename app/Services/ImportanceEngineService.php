@@ -26,4 +26,27 @@ class ImportanceEngineService
 
         return $roleWeight + $taskWeight + $urgency;
     }
+
+    public function bandwidthFromScore($score)
+    {
+        if ($score >= 18) {
+            return '10M/10M';
+        }
+
+        if ($score >= 14) {
+            return '7M/7M';
+        }
+
+        if ($score >= 10) {
+            return '5M/5M';
+        }
+
+        if ($score >= 6) {
+            return '2M/2M';
+        }
+
+        return '1M/1M';
+    }
+
 }
+
