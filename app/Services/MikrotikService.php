@@ -32,4 +32,12 @@ class MikrotikService
 
         return $this->client->query($query)->read();
     }
+
+    public function getConnections()
+    {
+        return $this->client
+            ->query('/ip/firewall/connection/print')
+            ->read();
+    }
+
 }

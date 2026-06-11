@@ -17,7 +17,6 @@ return new class extends Migration
             $table->string('classification')->nullable();
             $table->bigInteger('bytes')->default(0);
         });
-
     }
 
     /**
