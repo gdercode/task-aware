@@ -46,4 +46,14 @@ class User extends Authenticatable
             'password' => 'hashed',
         ];
     }
+
+    public function flows()
+    {
+        return $this->hasMany(Flow::class);
+    }
+
+    public function allocations()
+    {
+        return $this->hasMany(Allocation::class);
+    }
 }
