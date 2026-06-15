@@ -17,9 +17,16 @@
                     <p class="text-sm text-slate-400 mt-0.5">
                         @include('partials.role-badge', ['role' => $user->role])
                         <span class="ml-2 font-mono text-xs">{{ $user->ip_address }}</span>
+                        @if ($isGettingBandwidth)
+                            <span class="ml-2 inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/20 text-emerald-300">Getting bandwidth</span>
+                        @elseif ($isUsingBandwidth ?? false)
+                            <span class="ml-2 inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/20 text-amber-300">Using — awaiting allocation</span>
+                        @else
+                            <span class="ml-2 inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-slate-700 text-slate-400">Not using bandwidth</span>
+                        @endif
                     </p>
                 </div>
-                @if ($bandwidth || $score !== null)
+                @if ($isGettingBandwidth && ($bandwidth || $score !== null))
                     <div class="flex gap-3 self-start">
                         @if ($score !== null)
                             <div class="rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-2 text-center">

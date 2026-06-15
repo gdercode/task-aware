@@ -32,11 +32,11 @@
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
-                <p class="text-sm text-slate-400">Active Users</p>
+                <p class="text-sm text-slate-400">Getting Bandwidth</p>
                 <p class="mt-1 text-3xl font-semibold text-emerald-400">{{ number_format($stats['active_users']) }}</p>
             </div>
             <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
-                <p class="text-sm text-slate-400">Inactive Users</p>
+                <p class="text-sm text-slate-400">Not Using Bandwidth</p>
                 <p class="mt-1 text-3xl font-semibold text-slate-400">{{ number_format($stats['inactive_users']) }}</p>
             </div>
             <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
@@ -58,17 +58,17 @@
         </div>
 
         @include('partials.user-table', [
-            'title' => 'Active Users',
+            'title' => 'Getting Bandwidth',
             'users' => $activeUsers,
             'status' => 'active',
-            'emptyMessage' => 'No active users right now.',
+            'emptyMessage' => 'No users are receiving bandwidth right now. Run the allocator while traffic is active.',
         ])
 
         @include('partials.user-table', [
-            'title' => 'Inactive Users',
+            'title' => 'Not Using Bandwidth',
             'users' => $inactiveUsers,
             'status' => 'inactive',
-            'emptyMessage' => 'All monitored users are currently active.',
+            'emptyMessage' => 'All monitored users are currently receiving bandwidth.',
         ])
     </main>
 </div>

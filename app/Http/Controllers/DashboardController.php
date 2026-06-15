@@ -6,16 +6,23 @@ use App\Models\BandwidthLog;
 use App\Models\Flow;
 use App\Models\User;
 use App\Services\ImportanceEngineService;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\View\View;
 
 class DashboardController extends Controller
 {
+    private const ALLOCATION_CYCLE_SECONDS = 15;
+
     public function index(ImportanceEngineService $engine): View
     {
+        $cycleStart = $this->latestAllocationCycleStart();
+
+        $gettingBandwidthIds = $this->usersGettingBandwidth($cycleStart);
+
         $users = User::whereNotNull('ip_address')
             ->withCount(['flows as active_flows_count' => fn ($q) => $q->where('is_active', true)])
-            ->with(['flows' => fn ($q) => $q->where('is_active', true)->orderByDesc('importance_score')])
             ->orderBy('name')
             ->get();
 
@@ -23,28 +30,25 @@ class DashboardController extends Controller
         $inactiveUsers = collect();
 
         foreach ($users as $user) {
-            $latestLog = BandwidthLog::where('user_id', $user->id)->latest()->first();
-            $topFlow = $user->flows->first();
+            $isGettingBandwidth = $gettingBandwidthIds->contains($user->id);
+            $isUsingBandwidth = $user->active_flows_count > 0;
 
-            $score = $latestLog?->importance_score
-                ?? $topFlow?->importance_score
-                ?? null;
+            if ($isGettingBandwidth) {
+                $cycleLog = BandwidthLog::where('user_id', $user->id)
+                    ->when($cycleStart, fn ($q) => $q->where('created_at', '>=', $cycleStart))
+                    ->latest()
+                    ->first();
 
-            $bandwidth = $latestLog?->allocated_bandwidth;
-
-            $row = (object) [
-                'user' => $user,
-                'score' => $score,
-                'bandwidth' => $bandwidth,
-                'bandwidth_mbps' => $bandwidth ? $engine->parseBandwidthToMbps($bandwidth) : 0,
-                'last_seen_at' => $latestLog?->created_at,
-                'active_flows_count' => $user->active_flows_count,
-            ];
-
-            if ($user->active_flows_count > 0) {
-                $activeUsers->push($row);
-            } else {
-                $inactiveUsers->push($row);
+                $activeUsers->push((object) [
+                    'user' => $user,
+                    'score' => $cycleLog?->importance_score,
+                    'bandwidth' => $cycleLog?->allocated_bandwidth,
+                    'last_seen_at' => $cycleLog?->created_at,
+                ]);
+            } elseif (! $isUsingBandwidth) {
+                $inactiveUsers->push((object) [
+                    'user' => $user,
+                ]);
             }
         }
 
@@ -84,14 +88,25 @@ class DashboardController extends Controller
             ->orderByDesc('importance_score')
             ->get();
 
-        $latestLog = BandwidthLog::where('user_id', $user->id)->latest()->first();
+        $cycleStart = $this->latestAllocationCycleStart();
+        $isGettingBandwidth = $this->usersGettingBandwidth($cycleStart)->contains($user->id);
+        $isUsingBandwidth = $activeFlows->isNotEmpty();
 
-        $activeFlows->each(function ($flow) use ($latestLog) {
-            $flow->allocated_bandwidth = $latestLog?->allocated_bandwidth;
+        $latestLog = $isGettingBandwidth
+            ? BandwidthLog::where('user_id', $user->id)
+                ->when($cycleStart, fn ($q) => $q->where('created_at', '>=', $cycleStart))
+                ->latest()
+                ->first()
+            : BandwidthLog::where('user_id', $user->id)->latest()->first();
+
+        $activeFlows->each(function ($flow) use ($latestLog, $isGettingBandwidth) {
+            $flow->allocated_bandwidth = $isGettingBandwidth ? $latestLog?->allocated_bandwidth : null;
         });
 
-        $score = $latestLog?->importance_score ?? $activeFlows->max('importance_score');
-        $bandwidth = $latestLog?->allocated_bandwidth;
+        $score = $isGettingBandwidth
+            ? $latestLog?->importance_score
+            : null;
+        $bandwidth = $isGettingBandwidth ? $latestLog?->allocated_bandwidth : null;
 
         return view('allocation-reports', compact(
             'user',
@@ -102,6 +117,30 @@ class DashboardController extends Controller
             'latestLog',
             'score',
             'bandwidth',
+            'isGettingBandwidth',
+            'isUsingBandwidth',
         ));
+    }
+
+    private function latestAllocationCycleStart(): ?Carbon
+    {
+        $latestLog = BandwidthLog::latest()->first();
+
+        if (! $latestLog) {
+            return null;
+        }
+
+        return $latestLog->created_at->copy()->subSeconds(self::ALLOCATION_CYCLE_SECONDS);
+    }
+
+    private function usersGettingBandwidth(?Carbon $cycleStart): Collection
+    {
+        if (! $cycleStart) {
+            return collect();
+        }
+
+        return BandwidthLog::where('created_at', '>=', $cycleStart)
+            ->distinct()
+            ->pluck('user_id');
     }
 }

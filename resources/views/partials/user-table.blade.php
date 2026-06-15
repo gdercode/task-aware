@@ -28,8 +28,10 @@
                         <th class="px-5 py-3 font-medium">User</th>
                         <th class="px-5 py-3 font-medium">Role</th>
                         <th class="px-5 py-3 font-medium">Status</th>
-                        <th class="px-5 py-3 font-medium text-right">Score</th>
-                        <th class="px-5 py-3 font-medium text-right">Bandwidth</th>
+                        @if ($isActive)
+                            <th class="px-5 py-3 font-medium text-right">Score</th>
+                            <th class="px-5 py-3 font-medium text-right">Bandwidth</th>
+                        @endif
                         <th class="px-5 py-3 font-medium text-right"></th>
                     </tr>
                 </thead>
@@ -45,24 +47,26 @@
                             </td>
                             <td class="px-5 py-3">
                                 @if ($isActive)
-                                    <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/20 text-emerald-300">Active</span>
+                                    <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/20 text-emerald-300">Getting bandwidth</span>
                                 @else
-                                    <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-slate-700 text-slate-400">Inactive</span>
+                                    <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-slate-700 text-slate-400">Not using</span>
                                 @endif
                             </td>
-                            <td class="px-5 py-3 text-right font-mono text-amber-400 font-medium">
-                                {{ $row->score ?? '—' }}
-                            </td>
-                            <td class="px-5 py-3 text-right">
-                                @if ($row->bandwidth)
-                                    <span class="font-mono text-emerald-400 font-medium">{{ $row->bandwidth }}</span>
-                                    @if ($row->last_seen_at)
-                                        <span class="block text-xs text-slate-500 mt-0.5">{{ $row->last_seen_at->format('M j, H:i') }}</span>
+                            @if ($isActive)
+                                <td class="px-5 py-3 text-right font-mono text-amber-400 font-medium">
+                                    {{ $row->score ?? '—' }}
+                                </td>
+                                <td class="px-5 py-3 text-right">
+                                    @if ($row->bandwidth)
+                                        <span class="font-mono text-emerald-400 font-medium">{{ $row->bandwidth }}</span>
+                                        @if ($row->last_seen_at)
+                                            <span class="block text-xs text-slate-500 mt-0.5">{{ $row->last_seen_at->format('M j, H:i') }}</span>
+                                        @endif
+                                    @else
+                                        <span class="text-slate-500">—</span>
                                     @endif
-                                @else
-                                    <span class="text-slate-500">—</span>
-                                @endif
-                            </td>
+                                </td>
+                            @endif
                             <td class="px-5 py-3 text-right">
                                 <a href="{{ route('allocation-reports', $row->user) }}"
                                    class="inline-flex items-center px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition-colors border border-slate-700">
