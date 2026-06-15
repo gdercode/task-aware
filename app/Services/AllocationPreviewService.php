@@ -64,7 +64,13 @@ class AllocationPreviewService
             'total_score' => $totalScore,
             'online_count' => $onlineCount,
             'offline_count' => $offlineCount,
-            'activity' => $this->activity->summarize($monitoredUsers),
+            'activity' => [
+                'active' => collect($entries)->where('activity_status', 'active')->count(),
+                'low_usage' => collect($entries)->where('activity_status', 'low_usage')->count(),
+                'idle' => collect($entries)->where('activity_status', 'idle')->count(),
+                'offline' => collect($entries)->where('activity_status', 'offline')->count(),
+                'unknown' => collect($entries)->where('activity_status', 'unknown')->count(),
+            ],
             'users' => $rows->sortByDesc(fn ($row) => $row->share_kbps)->values(),
         ];
     }
@@ -80,20 +86,31 @@ class AllocationPreviewService
 
         foreach ($monitoredUsers as $user) {
             $isOnline = $this->mikrotik->isDeviceOnline($user->ip_address, $onlineIps);
-            $effectiveScore = ($isOnline && $user->activity_status !== 'offline')
+            $activityStatus = $isOnline ? $user->activity_status : 'offline';
+            $baseScore = (int) $user->base_score;
+            $effectiveScore = ($isOnline && $activityStatus !== 'offline' && $activityStatus !== 'idle')
                 ? (int) $user->effective_score
                 : 0;
 
+            if ($isOnline && ($activityStatus === 'unknown' || ($effectiveScore === 0 && $activityStatus !== 'idle'))) {
+                $baseScore = $baseScore > 0
+                    ? $baseScore
+                    : $this->engine->calculate($user->role, $user->current_task_type ?? 'NORMAL', 1);
+                $activityStatus = 'low_usage';
+                $effectiveScore = $this->engine->effectiveScore($baseScore, 'low_usage', $user->role);
+            }
+
             if (! $isOnline) {
                 $effectiveScore = 0;
+                $activityStatus = 'offline';
             }
 
             $entries[$user->id] = [
                 'user' => $user,
-                'base_score' => (int) $user->base_score,
+                'base_score' => $baseScore,
                 'effective_score' => $effectiveScore,
-                'activity_status' => $isOnline ? $user->activity_status : 'offline',
-                'task_type' => $user->current_task_type,
+                'activity_status' => $activityStatus,
+                'task_type' => $user->current_task_type ?? 'NORMAL',
                 'is_online' => $isOnline,
             ];
         }

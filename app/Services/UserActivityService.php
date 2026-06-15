@@ -32,7 +32,7 @@ class UserActivityService
         $baseScore = $this->bestActiveFlowScore($user);
         $taskType = $this->bestActiveFlowTaskType($user);
 
-        if ($hadConnections && $baseScore === 0) {
+        if ($baseScore === 0) {
             $baseScore = $this->engine->calculate($user->role, 'NORMAL', 1);
             $taskType = 'NORMAL';
         }
@@ -95,7 +95,11 @@ class UserActivityService
         $idleSeconds = config('bandwidth.idle_seconds', 90);
         $lastActive = $user->last_active_at;
 
-        if (! $lastActive || $lastActive->diffInSeconds(now()) >= $idleSeconds) {
+        if (! $lastActive) {
+            return 'low_usage';
+        }
+
+        if ($lastActive->diffInSeconds(now()) >= $idleSeconds) {
             return 'idle';
         }
 
@@ -174,6 +178,7 @@ class UserActivityService
             'low_usage' => $users->where('activity_status', 'low_usage')->count(),
             'idle' => $users->where('activity_status', 'idle')->count(),
             'offline' => $users->where('activity_status', 'offline')->count(),
+            'unknown' => $users->where('activity_status', 'unknown')->count(),
         ];
     }
 }

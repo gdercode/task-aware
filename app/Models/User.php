@@ -24,6 +24,12 @@ class User extends Authenticatable
         'password',
         'role',
         'ip_address',
+        'last_traffic_bytes',
+        'last_active_at',
+        'activity_status',
+        'base_score',
+        'effective_score',
+        'current_task_type',
     ];
 
     /**
