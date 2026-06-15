@@ -40,8 +40,8 @@
                 <p class="mt-1 text-3xl font-semibold text-slate-400">{{ number_format($stats['inactive_users']) }}</p>
             </div>
             <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
-                <p class="text-sm text-slate-400">Active Flows</p>
-                <p class="mt-1 text-3xl font-semibold text-white">{{ number_format($stats['active_flows']) }}</p>
+                <p class="text-sm text-slate-400">Total Bandwidth Shared</p>
+                <p class="mt-1 text-3xl font-semibold text-emerald-400">{{ $stats['total_shared_bandwidth'] }}</p>
             </div>
             <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
                 <p class="text-sm text-slate-400">Total AL Reports</p>

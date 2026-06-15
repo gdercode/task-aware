@@ -28,7 +28,8 @@
                         <th class="px-5 py-3 font-medium">User</th>
                         <th class="px-5 py-3 font-medium">Role</th>
                         <th class="px-5 py-3 font-medium">Status</th>
-                        <th class="px-5 py-3 font-medium">Last Allocation</th>
+                        <th class="px-5 py-3 font-medium text-right">Score</th>
+                        <th class="px-5 py-3 font-medium text-right">Bandwidth</th>
                         <th class="px-5 py-3 font-medium text-right"></th>
                     </tr>
                 </thead>
@@ -49,9 +50,12 @@
                                     <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-slate-700 text-slate-400">Inactive</span>
                                 @endif
                             </td>
-                            <td class="px-5 py-3">
-                                @if ($row->last_allocation)
-                                    <span class="font-mono text-emerald-400 font-medium">{{ $row->last_allocation }}</span>
+                            <td class="px-5 py-3 text-right font-mono text-amber-400 font-medium">
+                                {{ $row->score ?? '—' }}
+                            </td>
+                            <td class="px-5 py-3 text-right">
+                                @if ($row->bandwidth)
+                                    <span class="font-mono text-emerald-400 font-medium">{{ $row->bandwidth }}</span>
                                     @if ($row->last_seen_at)
                                         <span class="block text-xs text-slate-500 mt-0.5">{{ $row->last_seen_at->format('M j, H:i') }}</span>
                                     @endif

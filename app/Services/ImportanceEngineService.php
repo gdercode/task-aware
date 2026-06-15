@@ -48,5 +48,18 @@ class ImportanceEngineService
         return '1M/1M';
     }
 
+    public function parseBandwidthToMbps(string $bandwidth): int
+    {
+        if (preg_match('/^(\d+)M/i', $bandwidth, $matches)) {
+            return (int) $matches[1];
+        }
+
+        return 0;
+    }
+
+    public function formatMbpsTotal(int $mbps): string
+    {
+        return $mbps > 0 ? "{$mbps}M" : '0M';
+    }
 }
 

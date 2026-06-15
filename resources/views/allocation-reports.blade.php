@@ -19,11 +19,23 @@
                         <span class="ml-2 font-mono text-xs">{{ $user->ip_address }}</span>
                     </p>
                 </div>
-                @if ($latestLog)
-                    <div class="self-start rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-4 py-2">
-                        <p class="text-xs text-slate-400">Last allocation</p>
-                        <p class="font-mono text-lg font-semibold text-emerald-400">{{ $latestLog->allocated_bandwidth }}</p>
-                        <p class="text-xs text-slate-500 mt-0.5">{{ $latestLog->created_at->format('M j, Y H:i:s') }}</p>
+                @if ($bandwidth || $score !== null)
+                    <div class="flex gap-3 self-start">
+                        @if ($score !== null)
+                            <div class="rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-2 text-center">
+                                <p class="text-xs text-slate-400">Score</p>
+                                <p class="font-mono text-lg font-semibold text-amber-400">{{ $score }}</p>
+                            </div>
+                        @endif
+                        @if ($bandwidth)
+                            <div class="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-4 py-2 text-center">
+                                <p class="text-xs text-slate-400">Bandwidth</p>
+                                <p class="font-mono text-lg font-semibold text-emerald-400">{{ $bandwidth }}</p>
+                                @if ($latestLog)
+                                    <p class="text-xs text-slate-500 mt-0.5">{{ $latestLog->created_at->format('M j, H:i:s') }}</p>
+                                @endif
+                            </div>
+                        @endif
                     </div>
                 @endif
             </div>
@@ -44,6 +56,7 @@
                                 <th class="px-5 py-3 font-medium">Task</th>
                                 <th class="px-5 py-3 font-medium">Destination</th>
                                 <th class="px-5 py-3 font-medium text-right">Score</th>
+                                <th class="px-5 py-3 font-medium text-right">Bandwidth</th>
                                 <th class="px-5 py-3 font-medium text-right">Bytes</th>
                             </tr>
                         </thead>
@@ -57,6 +70,7 @@
                                     </td>
                                     <td class="px-5 py-3 text-slate-400 truncate max-w-[240px]">{{ $flow->destination ?? '—' }}</td>
                                     <td class="px-5 py-3 text-right font-mono text-amber-400">{{ $flow->importance_score ?? '—' }}</td>
+                                    <td class="px-5 py-3 text-right font-mono text-emerald-400">{{ $flow->allocated_bandwidth ?? '—' }}</td>
                                     <td class="px-5 py-3 text-right font-mono text-slate-400">{{ number_format($flow->bytes) }}</td>
                                 </tr>
                             @endforeach
