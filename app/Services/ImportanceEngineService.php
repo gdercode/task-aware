@@ -68,14 +68,45 @@ class ImportanceEngineService
     }
 
     /**
-     * Share the measured pool proportionally by importance score.
+     * Split the measured pool across users by score. Total allocated always equals poolMbps.
+     *
+     * @param  array<int|string, int>  $scores
+     * @return array<int|string, int>
      */
-    public function allocateFromPool(int $score, int $totalScore, int $poolMbps): int
+    public function distributePool(array $scores, int $poolMbps): array
     {
-        if ($totalScore <= 0 || $poolMbps <= 0) {
-            return 1;
+        if ($scores === [] || $poolMbps <= 0) {
+            return [];
         }
 
-        return max(1, (int) round(($score / $totalScore) * $poolMbps));
+        $totalScore = array_sum($scores);
+        if ($totalScore <= 0) {
+            return array_fill_keys(array_keys($scores), 0);
+        }
+
+        $allocations = [];
+        $fractions = [];
+        $assigned = 0;
+
+        foreach ($scores as $id => $score) {
+            $exact = ($score / $totalScore) * $poolMbps;
+            $floor = (int) floor($exact);
+            $allocations[$id] = $floor;
+            $assigned += $floor;
+            $fractions[$id] = $exact - $floor;
+        }
+
+        $remaining = $poolMbps - $assigned;
+        arsort($fractions);
+
+        foreach (array_keys($fractions) as $id) {
+            if ($remaining <= 0) {
+                break;
+            }
+            $allocations[$id]++;
+            $remaining--;
+        }
+
+        return $allocations;
     }
 }

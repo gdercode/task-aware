@@ -164,8 +164,7 @@ class MikrotikService
         $txBps = (int) ($sample['tx-bits-per-second'] ?? 0);
 
         $totalBps = $rxBps + $txBps;
-        $mbps = (int) ceil($totalBps / 1_000_000);
 
-        return max(1, $mbps);
+        return (int) ceil($totalBps / 1_000_000);
     }
 }

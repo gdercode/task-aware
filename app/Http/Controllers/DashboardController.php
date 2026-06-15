@@ -51,12 +51,14 @@ class DashboardController extends Controller
 
             $poolMbps = $mikrotik->tryMeasureIncomingBandwidthMbps();
 
-            if ($poolMbps !== null) {
+            if ($poolMbps === null) {
+                $bandwidthMeasureError = 'Connected to MikroTik but could not measure traffic. Set the correct monitor interface (e.g. ether1, wlan1).';
+            } elseif ($poolMbps === 0) {
+                $bandwidthMeasureError = 'No traffic measured on the monitor interface right now (0 Mbps pool).';
+            } else {
                 $latestAvailable = $engine->formatLimit($poolMbps);
                 $totalAvailableAt = now();
                 $activeUsers = $allocationPreview->forActiveFlows($poolMbps);
-            } else {
-                $bandwidthMeasureError = 'Connected to MikroTik but could not measure traffic. Set the correct monitor interface (e.g. ether1, wlan1).';
             }
 
             // Prefer recent live allocation logs from the allocator when available

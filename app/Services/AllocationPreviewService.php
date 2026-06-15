@@ -45,10 +45,16 @@ class AllocationPreviewService
         }
 
         $totalScore = array_sum(array_column($scoredUsers, 'score'));
+        $scores = collect($scoredUsers)->mapWithKeys(fn ($entry, $userId) => [$userId => $entry['score']])->all();
+        $distribution = $this->engine->distributePool($scores, $poolMbps);
         $rows = collect();
 
-        foreach ($scoredUsers as $entry) {
-            $shareMbps = $this->engine->allocateFromPool($entry['score'], $totalScore, $poolMbps);
+        foreach ($scoredUsers as $userId => $entry) {
+            $shareMbps = $distribution[$userId] ?? 0;
+
+            if ($shareMbps <= 0) {
+                continue;
+            }
 
             $rows->push((object) [
                 'user' => $entry['user'],

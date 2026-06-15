@@ -37,12 +37,13 @@ class BandwidthLogSeeder extends Seeder
             ];
         }
 
-        $totalScore = array_sum(array_column($scores, 'score'));
+        $scoreValues = collect($scores)->mapWithKeys(fn ($entry, $id) => [$id => $entry['score']])->all();
+        $distribution = $engine->distributePool($scoreValues, max($poolMbps, 1));
 
         foreach (range(1, 30) as $i) {
             $user = $users->random();
             $entry = $scores[$user->id];
-            $shareMbps = $engine->allocateFromPool($entry['score'], $totalScore, $poolMbps);
+            $shareMbps = $distribution[$user->id] ?? 0;
 
             BandwidthLog::create([
                 'user_id' => $user->id,
