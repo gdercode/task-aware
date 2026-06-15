@@ -36,14 +36,15 @@ class RunBandwidthAllocator extends Command
                 continue;
             }
 
+            $onlineIps = $mikrotik->tryGetOnlineDeviceIps() ?? [];
+            $this->line('Devices online on router: '.count($onlineIps));
+
             try {
-                $trafficSync->syncFromRouter($mikrotik, $detector);
+                $sync = $trafficSync->syncFromRouter($mikrotik, $detector, $onlineIps);
+                $this->line("Synced {$sync['synced']} connection(s)");
             } catch (\Throwable $e) {
                 $this->warn('Traffic sync failed: '.$e->getMessage());
             }
-
-            $onlineIps = $mikrotik->tryGetOnlineDeviceIps() ?? [];
-            $this->line('Devices online on router: '.count($onlineIps));
 
             $poolKbps = $mikrotik->tryMeasureIncomingBandwidthKbps();
 
@@ -56,36 +57,18 @@ class RunBandwidthAllocator extends Command
             $availableBandwidth = $engine->formatLimit($poolKbps);
             $this->info("Measured pool: {$engine->formatKbpsDisplay($poolKbps)} ({$availableBandwidth})");
 
-            Flow::with('user')
-                ->where('is_active', true)
-                ->get()
-                ->each(function (Flow $flow) use ($engine) {
-                    $score = $engine->calculate(
-                        $flow->user->role,
-                        $flow->classification,
-                        $flow->urgency_weight
-                    );
-                    $flow->importance_score = $score;
-                    $flow->save();
-                });
-
             $allocation = $allocationPreview->build($poolKbps, $onlineIps);
 
             foreach (User::whereNotNull('ip_address')->get() as $user) {
                 $row = $allocation['users']->firstWhere('user.id', $user->id);
                 $shareKbps = $row->share_kbps ?? 0;
                 $isOnline = $row->is_online ?? false;
+                $status = $row->activity_status ?? 'unknown';
 
-                if (! $isOnline) {
+                if (! $isOnline || $shareKbps <= 0) {
                     $mikrotik->updateQueue($user->name, $user->ip_address, '0k/0k');
-                    $this->line("{$user->name} → skipped (device offline at {$user->ip_address})");
-
-                    continue;
-                }
-
-                if ($shareKbps <= 0) {
-                    $mikrotik->updateQueue($user->name, $user->ip_address, '0k/0k');
-                    $this->line("{$user->name} → 0 Kbps (online, no active traffic score)");
+                    $reason = ! $isOnline ? 'offline' : $status;
+                    $this->line("{$user->name} → 0 Kbps ({$reason})");
 
                     continue;
                 }
@@ -99,17 +82,20 @@ class RunBandwidthAllocator extends Command
                 }
 
                 $score = $row->score ?? 0;
+                $taskType = $row->task_type
+                    ?? Flow::where('user_id', $user->id)->where('is_active', true)->value('classification')
+                    ?? 'NORMAL';
 
                 BandwidthLog::create([
                     'user_id' => $user->id,
-                    'task_type' => Flow::where('user_id', $user->id)->where('is_active', true)->value('classification') ?? 'NORMAL',
+                    'task_type' => $taskType,
                     'importance_score' => $score,
                     'allocated_bandwidth' => $bandwidth,
                     'available_bandwidth' => $availableBandwidth,
                     'router_connected' => true,
                 ]);
 
-                $this->info("{$user->name} → {$engine->formatKbpsDisplay($shareKbps)} ({$bandwidth}, score {$score})");
+                $this->info("{$user->name} → {$engine->formatKbpsDisplay($shareKbps)} ({$bandwidth}, score {$score}, {$status})");
             }
 
             sleep(5);

@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use App\Models\Flow;
 use App\Models\User;
 use Illuminate\Support\Collection;
 
@@ -11,6 +10,7 @@ class AllocationPreviewService
     public function __construct(
         protected ImportanceEngineService $engine,
         protected MikrotikService $mikrotik,
+        protected UserActivityService $activity,
     ) {}
 
     /**
@@ -22,52 +22,42 @@ class AllocationPreviewService
      *     total_score: int,
      *     online_count: int,
      *     offline_count: int,
+     *     activity: array<string, int>,
      *     users: Collection
      * }
      */
     public function build(int $poolKbps, array $onlineIps = []): array
     {
-        $flows = Flow::with('user')
-            ->where('is_active', true)
-            ->get();
-
-        $flowScores = [];
-
-        foreach ($flows as $flow) {
-            $score = $this->engine->calculate(
-                $flow->user->role,
-                $flow->classification ?? $flow->task_type,
-                $flow->urgency_weight ?? 1
-            );
-
-            $userId = $flow->user_id;
-
-            if (! isset($flowScores[$userId]) || $score > $flowScores[$userId]) {
-                $flowScores[$userId] = $score;
-            }
-        }
-
         $monitoredUsers = User::whereNotNull('ip_address')->orderBy('name')->get();
         $entries = [];
 
         foreach ($monitoredUsers as $user) {
             $isOnline = $this->mikrotik->isDeviceOnline($user->ip_address, $onlineIps);
-            $score = $flowScores[$user->id] ?? 0;
+            $effectiveScore = ($isOnline && $user->activity_status !== 'offline')
+                ? (int) $user->effective_score
+                : 0;
+
+            if (! $isOnline) {
+                $effectiveScore = 0;
+            }
 
             $entries[$user->id] = [
                 'user' => $user,
-                'score' => $score,
+                'base_score' => (int) $user->base_score,
+                'effective_score' => $effectiveScore,
+                'activity_status' => $isOnline ? $user->activity_status : 'offline',
+                'task_type' => $user->current_task_type,
                 'is_online' => $isOnline,
             ];
         }
 
-        $onlineScores = collect($entries)
-            ->filter(fn ($entry) => $entry['is_online'] && $entry['score'] > 0)
-            ->mapWithKeys(fn ($entry, $userId) => [$userId => $entry['score']])
+        $allocatableScores = collect($entries)
+            ->filter(fn ($entry) => $entry['is_online'] && $entry['effective_score'] > 0)
+            ->mapWithKeys(fn ($entry, $userId) => [$userId => $entry['effective_score']])
             ->all();
 
-        $totalScore = array_sum($onlineScores);
-        $distribution = $this->engine->distributePool($onlineScores, $poolKbps);
+        $totalScore = array_sum($allocatableScores);
+        $distribution = $this->engine->distributePool($allocatableScores, $poolKbps);
         $rows = collect();
         $onlineCount = 0;
         $offlineCount = 0;
@@ -79,20 +69,24 @@ class AllocationPreviewService
                 $offlineCount++;
             }
 
-            $shareKbps = $entry['is_online'] ? ($distribution[$userId] ?? 0) : 0;
-            $sharePercent = ($entry['is_online'] && $totalScore > 0 && $entry['score'] > 0)
-                ? round(($entry['score'] / $totalScore) * 100, 1)
+            $shareKbps = ($entry['effective_score'] > 0) ? ($distribution[$userId] ?? 0) : 0;
+            $sharePercent = ($totalScore > 0 && $entry['effective_score'] > 0)
+                ? round(($entry['effective_score'] / $totalScore) * 100, 1)
                 : 0;
 
             $rows->push((object) [
                 'user' => $entry['user'],
-                'score' => $entry['score'],
+                'score' => $entry['effective_score'],
+                'base_score' => $entry['base_score'],
+                'activity_status' => $entry['activity_status'],
+                'activity_label' => $this->activity->activityLabel($entry['activity_status']),
+                'task_type' => $entry['task_type'],
                 'is_online' => $entry['is_online'],
                 'share_percent' => $sharePercent,
                 'share_kbps' => $shareKbps,
                 'kbps_display' => $this->engine->formatKbpsDisplay($shareKbps),
                 'bandwidth' => $shareKbps > 0 ? $this->engine->formatLimit($shareKbps) : '0k/0k',
-                'last_seen_at' => now(),
+                'last_seen_at' => $entry['user']->last_active_at,
             ]);
         }
 
@@ -103,7 +97,8 @@ class AllocationPreviewService
             'total_score' => $totalScore,
             'online_count' => $onlineCount,
             'offline_count' => $offlineCount,
-            'users' => $rows->sortByDesc(fn ($row) => $row->is_online ? $row->share_kbps : -1)->values(),
+            'activity' => $this->activity->summarize($monitoredUsers),
+            'users' => $rows->sortByDesc(fn ($row) => $row->share_kbps)->values(),
         ];
     }
 

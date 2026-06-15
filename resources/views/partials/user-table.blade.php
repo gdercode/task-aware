@@ -50,6 +50,10 @@
                             <td class="px-5 py-3">
                                 @if ($isActive)
                                     <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/20 text-emerald-300">Getting bandwidth</span>
+                                @elseif (isset($row->activity_status) && $row->activity_status === 'idle')
+                                    <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-slate-700 text-slate-400">Idle</span>
+                                @elseif (isset($row->activity_status) && $row->activity_status === 'low_usage')
+                                    <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/20 text-amber-300">Low usage</span>
                                 @elseif (isset($row->is_online) && ! $row->is_online)
                                     <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/20 text-red-300">Device offline</span>
                                 @else

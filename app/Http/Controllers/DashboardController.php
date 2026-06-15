@@ -53,13 +53,13 @@ class DashboardController extends Controller
         $onlineIps = [];
 
         if ($mikrotikConnected) {
+            $onlineIps = $mikrotik->tryGetOnlineDeviceIps() ?? [];
+
             try {
-                $trafficSync->syncFromRouter($mikrotik, $detector);
+                $trafficSync->syncFromRouter($mikrotik, $detector, $onlineIps);
             } catch (\Throwable) {
                 // Connection can succeed for identity but fail on connection table — continue
             }
-
-            $onlineIps = $mikrotik->tryGetOnlineDeviceIps() ?? [];
 
             $poolKbps = $mikrotik->tryMeasureIncomingBandwidthKbps();
 
@@ -90,7 +90,13 @@ class DashboardController extends Controller
                         'is_online' => $row?->is_online ?? $mikrotik->isDeviceOnline($user->ip_address, $onlineIps),
                         'share_kbps' => 0,
                         'kbps_display' => '0 Kbps',
-                        'offline_reason' => ($row && ! $row->is_online) ? 'Device offline' : 'No active traffic',
+                        'activity_status' => $row?->activity_status ?? $user->activity_status,
+                        'offline_reason' => match ($row?->activity_status ?? $user->activity_status) {
+                            'offline' => 'Device offline',
+                            'idle' => 'Idle — no internet use',
+                            'low_usage' => 'Low usage — minimal share',
+                            default => 'No bandwidth allocated',
+                        },
                     ]);
                 }
             }
@@ -107,6 +113,7 @@ class DashboardController extends Controller
             'inactive_users' => $inactiveUsers->count(),
             'online_devices' => $allocation['online_count'] ?? 0,
             'offline_devices' => $allocation['offline_count'] ?? 0,
+            'activity' => $allocation['activity'] ?? [],
             'pool_kbps' => $allocation['pool_kbps'] ?? 0,
             'active_flows' => Flow::where('is_active', true)->count(),
             'total_reports' => BandwidthLog::where('router_connected', true)->count(),

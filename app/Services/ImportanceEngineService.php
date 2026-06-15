@@ -27,6 +27,20 @@ class ImportanceEngineService
         return $roleWeight + $taskWeight + $urgency;
     }
 
+    public function roleScore(string $userRole): int
+    {
+        return $this->roleWeights[$userRole] ?? 1;
+    }
+
+    public function effectiveScore(int $baseScore, string $activityStatus, string $role): int
+    {
+        return match ($activityStatus) {
+            'offline', 'idle' => 0,
+            'low_usage' => $this->roleScore($role),
+            default => $baseScore,
+        };
+    }
+
     public function bandwidthFromScore($score)
     {
         if ($score >= 18) {

@@ -7,10 +7,26 @@ use App\Models\User;
 
 class TrafficSyncService
 {
-    public function syncFromRouter(MikrotikService $mikrotik, TrafficDetectionService $detector): int
-    {
+    public function __construct(
+        protected UserActivityService $activity,
+        protected ImportanceEngineService $engine,
+    ) {}
+
+    /**
+     * Sync router connections, refresh task classifications, and update user activity.
+     *
+     * @param  array<string, true>  $onlineIps
+     * @return array{synced: int, user_bytes: array<int, int>}
+     */
+    public function syncFromRouter(
+        MikrotikService $mikrotik,
+        TrafficDetectionService $detector,
+        array $onlineIps = [],
+    ): array {
         $connections = $mikrotik->getConnections();
         $usersByIp = User::whereNotNull('ip_address')->get()->keyBy('ip_address');
+        $userBytes = [];
+        $seenUserIds = [];
         $synced = 0;
 
         foreach ($connections as $conn) {
@@ -31,10 +47,19 @@ class TrafficSyncService
             $bytes = (int) ($conn['bytes'] ?? $conn['orig-bytes'] ?? 0);
             $classification = $detector->classify($dst, $bytes, false);
 
+            $userBytes[$user->id] = ($userBytes[$user->id] ?? 0) + $bytes;
+            $seenUserIds[$user->id] = true;
+
             $flow = Flow::where('user_id', $user->id)
                 ->where('is_active', true)
                 ->where('destination', $dst)
                 ->first();
+
+            $score = $this->engine->calculate(
+                $user->role,
+                $classification,
+                $flow?->urgency_weight ?? 1
+            );
 
             if ($flow) {
                 $flow->update([
@@ -42,6 +67,7 @@ class TrafficSyncService
                     'task_type' => $classification,
                     'bytes' => max($flow->bytes, $bytes),
                     'source_ip' => $srcIp,
+                    'importance_score' => $score,
                 ]);
             } else {
                 Flow::create([
@@ -53,12 +79,24 @@ class TrafficSyncService
                     'destination' => $dst,
                     'classification' => $classification,
                     'bytes' => $bytes,
+                    'urgency_weight' => 1,
+                    'importance_score' => $score,
                 ]);
             }
 
             $synced++;
         }
 
-        return $synced;
+        foreach ($usersByIp as $user) {
+            $isOnline = $mikrotik->isDeviceOnline($user->ip_address, $onlineIps);
+            $bytes = $userBytes[$user->id] ?? 0;
+
+            $this->activity->evaluate($user, $bytes, $isOnline);
+        }
+
+        return [
+            'synced' => $synced,
+            'user_bytes' => $userBytes,
+        ];
     }
 }
