@@ -41,6 +41,12 @@ class DashboardController extends Controller
         $inactiveUsers = collect();
         $latestAvailable = null;
         $totalAvailableAt = null;
+        $allocation = [
+            'pool_kbps' => 0,
+            'pool_label' => '0k/0k',
+            'total_score' => 0,
+            'users' => collect(),
+        ];
 
         if ($mikrotikConnected) {
             try {
@@ -49,33 +55,23 @@ class DashboardController extends Controller
                 // Connection can succeed for identity but fail on connection table — continue
             }
 
-            $poolMbps = $mikrotik->tryMeasureIncomingBandwidthMbps();
+            $poolKbps = $mikrotik->tryMeasureIncomingBandwidthKbps();
 
-            if ($poolMbps === null) {
+            if ($poolKbps === null) {
                 $bandwidthMeasureError = 'Connected to MikroTik but could not measure traffic. Set the correct monitor interface (e.g. ether1, wlan1).';
-            } elseif ($poolMbps === 0) {
-                $bandwidthMeasureError = 'No traffic measured on the monitor interface right now (0 Mbps pool).';
             } else {
-                $latestAvailable = $engine->formatLimit($poolMbps);
+                $latestAvailable = $engine->formatLimit($poolKbps);
                 $totalAvailableAt = now();
-                $activeUsers = $allocationPreview->forActiveFlows($poolMbps);
-            }
+                $allocation = $allocationPreview->build($poolKbps);
 
-            // Prefer recent live allocation logs from the allocator when available
-            $loggedUsers = $this->usersFromRecentLogs($engine);
-            if ($loggedUsers->isNotEmpty()) {
-                $activeUsers = $loggedUsers;
-                $latestLog = BandwidthLog::where('router_connected', true)
-                    ->whereNotNull('available_bandwidth')
-                    ->latest()
-                    ->first();
-                if ($latestLog) {
-                    $latestAvailable = $latestLog->available_bandwidth;
-                    $totalAvailableAt = $latestLog->created_at;
+                if ($poolKbps === 0) {
+                    $bandwidthMeasureError = 'No traffic on the monitor interface (0 Kbps pool). Allocations will appear when traffic is detected.';
                 }
+
+                $activeUsers = $allocation['users']->filter(fn ($row) => $row->share_kbps > 0)->values();
             }
 
-            $activeUserIds = $activeUsers->pluck('user.id');
+            $activeUserIds = $allocation['users']->pluck('user.id');
 
             foreach ($users as $user) {
                 if (! $activeUserIds->contains($user->id) && $user->active_flows_count === 0) {
@@ -106,6 +102,7 @@ class DashboardController extends Controller
             'mikrotikSettings',
             'mikrotikConnected',
             'bandwidthMeasureError',
+            'allocation',
         ));
     }
 

@@ -122,10 +122,10 @@ class MikrotikService
     }
 
     /**
-     * Measure live traffic on the monitored WAN interface (bits/sec → Mbps).
+     * Measure live traffic on the monitored WAN interface (bits/sec → Kbps).
      * Returns null when measurement fails (e.g. wrong interface name).
      */
-    public function tryMeasureIncomingBandwidthMbps(): ?int
+    public function tryMeasureIncomingBandwidthKbps(): ?int
     {
         try {
             return $this->measureFromInterface();
@@ -136,17 +136,17 @@ class MikrotikService
         }
     }
 
-    public function measureIncomingBandwidthMbps(): int
+    public function measureIncomingBandwidthKbps(): int
     {
-        $mbps = $this->tryMeasureIncomingBandwidthMbps();
+        $kbps = $this->tryMeasureIncomingBandwidthKbps();
 
-        if ($mbps === null) {
+        if ($kbps === null) {
             throw new \RuntimeException(
                 'Could not measure bandwidth on interface '.$this->settings()->monitor_interface
             );
         }
 
-        return $mbps;
+        return $kbps;
     }
 
     protected function measureFromInterface(): int
@@ -165,6 +165,6 @@ class MikrotikService
 
         $totalBps = $rxBps + $txBps;
 
-        return (int) ceil($totalBps / 1_000_000);
+        return (int) ceil($totalBps / 1_000);
     }
 }

@@ -75,7 +75,7 @@
             </div>
             <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
                 <p class="text-sm text-slate-400">Total Bandwidth Available</p>
-                @if ($stats['total_available_bandwidth'])
+                @if ($mikrotikConnected && $stats['total_available_bandwidth'] !== null)
                     <p class="mt-1 text-3xl font-semibold text-emerald-400">{{ $stats['total_available_bandwidth'] }}</p>
                     @if ($stats['total_available_at'])
                         <p class="text-xs text-slate-500 mt-1">Measured live · {{ $stats['total_available_at']->format('M j, H:i:s') }}</p>
@@ -90,6 +90,10 @@
                 <p class="mt-1 text-3xl font-semibold text-white">{{ number_format($stats['total_reports']) }}</p>
             </div>
         </div>
+
+        @if ($mikrotikConnected)
+            @include('partials.allocation-breakdown', ['allocation' => $allocation])
+        @endif
 
         @include('partials.user-table', [
             'title' => 'Getting Bandwidth',

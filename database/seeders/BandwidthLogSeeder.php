@@ -25,8 +25,8 @@ class BandwidthLogSeeder extends Seeder
             return;
         }
 
-        $poolMbps = $monitor->measureIncomingBandwidthMbps();
-        $availableBandwidth = $engine->formatLimit($poolMbps);
+        $poolKbps = $monitor->measureIncomingBandwidthKbps();
+        $availableBandwidth = $engine->formatLimit($poolKbps);
 
         $scores = [];
         foreach ($users as $user) {
@@ -38,18 +38,18 @@ class BandwidthLogSeeder extends Seeder
         }
 
         $scoreValues = collect($scores)->mapWithKeys(fn ($entry, $id) => [$id => $entry['score']])->all();
-        $distribution = $engine->distributePool($scoreValues, max($poolMbps, 1));
+        $distribution = $engine->distributePool($scoreValues, max($poolKbps, 1));
 
         foreach (range(1, 30) as $i) {
             $user = $users->random();
             $entry = $scores[$user->id];
-            $shareMbps = $distribution[$user->id] ?? 0;
+            $shareKbps = $distribution[$user->id] ?? 0;
 
             BandwidthLog::create([
                 'user_id' => $user->id,
                 'task_type' => $entry['task_type'],
                 'importance_score' => $entry['score'],
-                'allocated_bandwidth' => $engine->formatLimit($shareMbps),
+                'allocated_bandwidth' => $engine->formatLimit($shareKbps),
                 'available_bandwidth' => $availableBandwidth,
                 'router_connected' => false,
                 'created_at' => now()->subMinutes(30 - $i),

@@ -30,52 +30,56 @@ class ImportanceEngineService
     public function bandwidthFromScore($score)
     {
         if ($score >= 18) {
-            return '10M/10M';
+            return '10240k/10240k';
         }
 
         if ($score >= 14) {
-            return '7M/7M';
+            return '7168k/7168k';
         }
 
         if ($score >= 10) {
-            return '5M/5M';
+            return '5120k/5120k';
         }
 
         if ($score >= 6) {
-            return '2M/2M';
+            return '2048k/2048k';
         }
 
-        return '1M/1M';
+        return '1024k/1024k';
     }
 
-    public function parseBandwidthToMbps(string $bandwidth): int
+    public function parseBandwidthToKbps(string $bandwidth): int
     {
-        if (preg_match('/^(\d+)M/i', $bandwidth, $matches)) {
+        if (preg_match('/^(\d+)k/i', $bandwidth, $matches)) {
             return (int) $matches[1];
+        }
+
+        if (preg_match('/^(\d+)M/i', $bandwidth, $matches)) {
+            return (int) $matches[1] * 1000;
         }
 
         return 0;
     }
 
-    public function formatMbpsTotal(int $mbps): string
+    public function formatKbpsTotal(int $kbps): string
     {
-        return $mbps > 0 ? "{$mbps}M" : '0M';
+        return $kbps > 0 ? "{$kbps}k" : '0k';
     }
 
-    public function formatLimit(int $mbps): string
+    public function formatLimit(int $kbps): string
     {
-        return "{$mbps}M/{$mbps}M";
+        return "{$kbps}k/{$kbps}k";
     }
 
     /**
-     * Split the measured pool across users by score. Total allocated always equals poolMbps.
+     * Split the measured pool across users by score. Total allocated always equals poolKbps.
      *
      * @param  array<int|string, int>  $scores
      * @return array<int|string, int>
      */
-    public function distributePool(array $scores, int $poolMbps): array
+    public function distributePool(array $scores, int $poolKbps): array
     {
-        if ($scores === [] || $poolMbps <= 0) {
+        if ($scores === [] || $poolKbps <= 0) {
             return [];
         }
 
@@ -89,14 +93,14 @@ class ImportanceEngineService
         $assigned = 0;
 
         foreach ($scores as $id => $score) {
-            $exact = ($score / $totalScore) * $poolMbps;
+            $exact = ($score / $totalScore) * $poolKbps;
             $floor = (int) floor($exact);
             $allocations[$id] = $floor;
             $assigned += $floor;
             $fractions[$id] = $exact - $floor;
         }
 
-        $remaining = $poolMbps - $assigned;
+        $remaining = $poolKbps - $assigned;
         arsort($fractions);
 
         foreach (array_keys($fractions) as $id) {

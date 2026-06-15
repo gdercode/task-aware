@@ -30,6 +30,7 @@
                         <th class="px-5 py-3 font-medium">Status</th>
                         @if ($isActive)
                             <th class="px-5 py-3 font-medium text-right">Score</th>
+                            <th class="px-5 py-3 font-medium text-right">Share</th>
                             <th class="px-5 py-3 font-medium text-right">Bandwidth</th>
                         @endif
                         <th class="px-5 py-3 font-medium text-right"></th>
@@ -55,6 +56,9 @@
                             @if ($isActive)
                                 <td class="px-5 py-3 text-right font-mono text-amber-400 font-medium">
                                     {{ $row->score ?? '—' }}
+                                </td>
+                                <td class="px-5 py-3 text-right text-slate-400">
+                                    {{ isset($row->share_percent) ? $row->share_percent.'%' : '—' }}
                                 </td>
                                 <td class="px-5 py-3 text-right">
                                     @if ($row->bandwidth)

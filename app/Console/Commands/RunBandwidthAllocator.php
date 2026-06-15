@@ -38,15 +38,15 @@ class RunBandwidthAllocator extends Command
                 continue;
             }
 
-            $poolMbps = $mikrotik->tryMeasureIncomingBandwidthMbps();
+            $poolKbps = $mikrotik->tryMeasureIncomingBandwidthKbps();
 
-        if ($poolMbps === null || $poolMbps <= 0) {
+            if ($poolKbps === null || $poolKbps <= 0) {
                 $this->warn('Could not measure bandwidth — check monitor interface in dashboard settings');
                 sleep(5);
                 continue;
             }
 
-            $availableBandwidth = $engine->formatLimit($poolMbps);
+            $availableBandwidth = $engine->formatLimit($poolKbps);
 
             $this->info("MikroTik connected — measured pool: {$availableBandwidth}");
 
@@ -74,19 +74,19 @@ class RunBandwidthAllocator extends Command
 
             $totalScore = array_sum(array_column($scoredUsers, 'score'));
             $scores = collect($scoredUsers)->mapWithKeys(fn ($entry, $userId) => [$userId => $entry['score']])->all();
-            $distribution = $engine->distributePool($scores, $poolMbps);
+            $distribution = $engine->distributePool($scores, $poolKbps);
 
             foreach ($scoredUsers as $userId => $entry) {
                 $flow = $entry['flow'];
                 $score = $entry['score'];
-                $shareMbps = $distribution[$userId] ?? 0;
+                $shareKbps = $distribution[$userId] ?? 0;
 
-                if ($shareMbps <= 0) {
-                    $this->line("{$flow->user->name} → 0M (score {$score}, pool too small)");
+                if ($shareKbps <= 0) {
+                    $this->line("{$flow->user->name} → 0k (score {$score}, pool too small)");
                     continue;
                 }
 
-                $bandwidth = $engine->formatLimit($shareMbps);
+                $bandwidth = $engine->formatLimit($shareKbps);
 
                 $updated = $mikrotik->updateQueue(
                     $flow->user->name,
