@@ -29,10 +29,14 @@
                         <th class="px-5 py-3 font-medium">Role</th>
                         <th class="px-5 py-3 font-medium">Status</th>
                         @if ($isActive)
-                            <th class="px-5 py-3 font-medium text-right">Score</th>
+                            <th class="px-5 py-3 font-medium text-right">↓ Down</th>
+                            <th class="px-5 py-3 font-medium text-right">↑ Up</th>
+                            <th class="px-5 py-3 font-medium text-right">Live</th>
+                            <th class="px-5 py-3 font-medium text-right">Allocated</th>
                             <th class="px-5 py-3 font-medium text-right">Share</th>
-                            <th class="px-5 py-3 font-medium text-right">Kbps</th>
                             <th class="px-5 py-3 font-medium text-right">Queue</th>
+                        @else
+                            <th class="px-5 py-3 font-medium text-right">Throughput</th>
                         @endif
                         <th class="px-5 py-3 font-medium text-right"></th>
                     </tr>
@@ -63,24 +67,28 @@
                                 @endif
                             </td>
                             @if ($isActive)
-                                <td class="px-5 py-3 text-right font-mono text-amber-400 font-medium">
-                                    {{ $row->score ?? '—' }}
+                                <td class="px-5 py-3 text-right font-mono text-sky-400">
+                                    {{ number_format($row->throughput_down_kbps ?? 0) }}
                                 </td>
-                                <td class="px-5 py-3 text-right text-slate-400">
-                                    {{ isset($row->share_percent) ? $row->share_percent.'%' : '—' }}
+                                <td class="px-5 py-3 text-right font-mono text-violet-400">
+                                    {{ number_format($row->throughput_up_kbps ?? 0) }}
+                                </td>
+                                <td class="px-5 py-3 text-right font-mono font-semibold text-sky-300">
+                                    {{ number_format($row->throughput_total_kbps ?? 0) }}
                                 </td>
                                 <td class="px-5 py-3 text-right">
                                     <span class="font-mono font-semibold text-emerald-400">{{ number_format($row->share_kbps ?? 0) }}</span>
                                     <span class="text-xs text-slate-500"> Kbps</span>
-                                    @if (!empty($row->bandwidth))
-                                        <span class="block text-xs text-slate-500 mt-0.5 font-mono">{{ $row->bandwidth }}</span>
-                                    @endif
-                                    @if ($row->last_seen_at ?? null)
-                                        <span class="block text-xs text-slate-500 mt-0.5">{{ $row->last_seen_at->format('M j, H:i') }}</span>
-                                    @endif
+                                </td>
+                                <td class="px-5 py-3 text-right text-slate-400">
+                                    {{ isset($row->share_percent) ? $row->share_percent.'%' : '—' }}
                                 </td>
                                 <td class="px-5 py-3 text-right font-mono text-slate-400 text-xs">
                                     {{ $row->bandwidth ?? '0k/0k' }}
+                                </td>
+                            @else
+                                <td class="px-5 py-3 text-right font-mono text-slate-500 text-xs">
+                                    {{ $row->throughput_display ?? '0 Kbps' }}
                                 </td>
                             @endif
                             <td class="px-5 py-3 text-right">

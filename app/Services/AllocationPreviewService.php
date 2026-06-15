@@ -51,9 +51,12 @@ class AllocationPreviewService
 
         $poolUsingFallback = $measuredPoolKbps <= 0 && $poolKbps > 0;
         $distribution = $this->engine->distributePool($allocatableScores, $poolKbps);
-        $rows = $this->buildRows($entries, $distribution, $totalScore);
+        $userThroughput = $this->mikrotik->measureUserThroughputKbps();
+        $rows = $this->buildRows($entries, $distribution, $totalScore, $userThroughput);
         $onlineCount = collect($entries)->where('is_online', true)->count();
         $offlineCount = collect($entries)->where('is_online', false)->count();
+        $totalThroughputKbps = $rows->sum('throughput_total_kbps');
+        $totalAllocatedKbps = $rows->sum('share_kbps');
 
         return [
             'pool_kbps' => $poolKbps,
@@ -62,6 +65,8 @@ class AllocationPreviewService
             'pool_display' => $this->engine->formatKbpsDisplay(max($poolKbps, 0)),
             'pool_using_fallback' => $poolUsingFallback,
             'total_score' => $totalScore,
+            'total_throughput_kbps' => $totalThroughputKbps,
+            'total_allocated_kbps' => $totalAllocatedKbps,
             'online_count' => $onlineCount,
             'offline_count' => $offlineCount,
             'activity' => [
@@ -121,8 +126,9 @@ class AllocationPreviewService
     /**
      * @param  array<int, array<string, mixed>>  $entries
      * @param  array<int|string, int>  $distribution
+     * @param  array<int, array{download_kbps: int, upload_kbps: int, total_kbps: int}>  $userThroughput
      */
-    protected function buildRows(array $entries, array $distribution, int $totalScore): Collection
+    protected function buildRows(array $entries, array $distribution, int $totalScore, array $userThroughput = []): Collection
     {
         $rows = collect();
 
@@ -131,6 +137,12 @@ class AllocationPreviewService
             $sharePercent = ($totalScore > 0 && $entry['effective_score'] > 0)
                 ? round(($entry['effective_score'] / $totalScore) * 100, 1)
                 : 0;
+
+            $tp = $userThroughput[$userId] ?? [
+                'download_kbps' => 0,
+                'upload_kbps' => 0,
+                'total_kbps' => 0,
+            ];
 
             $rows->push((object) [
                 'user' => $entry['user'],
@@ -144,11 +156,32 @@ class AllocationPreviewService
                 'share_kbps' => $shareKbps,
                 'kbps_display' => $this->engine->formatKbpsDisplay($shareKbps),
                 'bandwidth' => $shareKbps > 0 ? $this->engine->formatLimit($shareKbps) : '0k/0k',
+                'throughput_down_kbps' => $tp['download_kbps'],
+                'throughput_up_kbps' => $tp['upload_kbps'],
+                'throughput_total_kbps' => $tp['total_kbps'],
+                'throughput_display' => $this->formatThroughputDisplay($tp),
                 'last_seen_at' => $entry['user']->last_active_at,
             ]);
         }
 
         return $rows;
+    }
+
+    /**
+     * @param  array{download_kbps: int, upload_kbps: int, total_kbps: int}  $tp
+     */
+    protected function formatThroughputDisplay(array $tp): string
+    {
+        if ($tp['total_kbps'] <= 0) {
+            return '0 Kbps';
+        }
+
+        return sprintf(
+            '%s Kbps (↓%s ↑%s)',
+            number_format($tp['total_kbps']),
+            number_format($tp['download_kbps']),
+            number_format($tp['upload_kbps'])
+        );
     }
 
     public function forActiveFlows(int $poolKbps, array $onlineIps = []): Collection

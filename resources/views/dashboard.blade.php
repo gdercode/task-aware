@@ -82,7 +82,7 @@
             </div>
         @endif
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
             <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
                 <p class="text-sm text-slate-400">Getting Bandwidth</p>
                 <p class="mt-1 text-3xl font-semibold text-emerald-400">{{ number_format($stats['active_users']) }}</p>
@@ -101,6 +101,11 @@
                         {{ $stats['activity']['active'] ?? 0 }} active · {{ $stats['activity']['idle'] ?? 0 }} idle
                     </p>
                 @endif
+            </div>
+            <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
+                <p class="text-sm text-slate-400">Live Throughput</p>
+                <p class="mt-1 text-3xl font-semibold text-sky-400">{{ number_format($stats['total_throughput_kbps'] ?? 0) }}</p>
+                <p class="text-xs text-slate-500 mt-1">Kbps on user connections now</p>
             </div>
             <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
                 <p class="text-sm text-slate-400">Total Bandwidth Available</p>

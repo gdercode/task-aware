@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\MikrotikSetting;
+use App\Models\User;
 use RouterOS\Client;
 use RouterOS\Exceptions\ConnectException;
 use RouterOS\Query;
@@ -285,6 +286,56 @@ class MikrotikService
             $this->resetClient();
 
             return 0;
+        }
+    }
+
+    /**
+     * Live per-user throughput from firewall connection rates (bits/sec → Kbps).
+     *
+     * @return array<int, array{download_kbps: int, upload_kbps: int, total_kbps: int}>
+     */
+    public function measureUserThroughputKbps(): array
+    {
+        try {
+            $usersByIp = User::whereNotNull('ip_address')
+                ->get()
+                ->keyBy(fn (User $user) => $this->normalizeIp($user->ip_address));
+
+            $bps = [];
+
+            foreach ($this->getConnections() as $conn) {
+                $src = $conn['src-address'] ?? null;
+
+                if (! $src) {
+                    continue;
+                }
+
+                $user = $usersByIp->get($this->normalizeIp(explode(':', $src)[0]));
+
+                if (! $user) {
+                    continue;
+                }
+
+                $bps[$user->id] ??= ['down' => 0, 'up' => 0];
+                $bps[$user->id]['up'] += (int) ($conn['orig-rate'] ?? 0);
+                $bps[$user->id]['down'] += (int) ($conn['repl-rate'] ?? 0);
+            }
+
+            $result = [];
+
+            foreach ($bps as $userId => $rates) {
+                $result[$userId] = [
+                    'download_kbps' => (int) ceil($rates['down'] / 1_000),
+                    'upload_kbps' => (int) ceil($rates['up'] / 1_000),
+                    'total_kbps' => (int) ceil(($rates['down'] + $rates['up']) / 1_000),
+                ];
+            }
+
+            return $result;
+        } catch (\Throwable) {
+            $this->resetClient();
+
+            return [];
         }
     }
 
