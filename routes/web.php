@@ -19,6 +19,9 @@ Route::get('/test-mikrotik', function (MikrotikService $mikrotik) {
 
 Route::get('/', [DashboardController::class, 'index'])->name('dashboard');
 
+Route::post('/mikrotik-settings', [DashboardController::class, 'updateMikrotik'])
+    ->name('mikrotik-settings.update');
+
 Route::get('/users/{user}/allocation-reports', [DashboardController::class, 'userReports'])
     ->name('allocation-reports');
 

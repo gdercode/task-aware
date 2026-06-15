@@ -12,7 +12,15 @@ class BandwidthLog extends Model
         'importance_score',
         'allocated_bandwidth',
         'available_bandwidth',
+        'router_connected',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'router_connected' => 'boolean',
+        ];
+    }
 
     public function user()
     {

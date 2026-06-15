@@ -2,7 +2,7 @@
 
 namespace App\Services;
 
-use App\Models\Flow;
+use App\Models\MikrotikSetting;
 use RouterOS\Client;
 use RouterOS\Exceptions\ConnectException;
 use RouterOS\Query;
@@ -11,14 +11,21 @@ class MikrotikService
 {
     protected ?Client $client = null;
 
+    protected function settings(): MikrotikSetting
+    {
+        return MikrotikSetting::current();
+    }
+
     protected function getClient(): Client
     {
         if ($this->client === null) {
+            $settings = $this->settings();
+
             $this->client = new Client([
-                'host' => config('mikrotik.host'),
+                'host' => $settings->host,
                 'user' => config('mikrotik.user'),
                 'pass' => config('mikrotik.pass'),
-                'port' => config('mikrotik.port'),
+                'port' => $settings->port,
                 'timeout' => config('mikrotik.timeout'),
             ]);
         }
@@ -33,11 +40,9 @@ class MikrotikService
 
     public function connectionLabel(): string
     {
-        return sprintf(
-            '%s:%d',
-            config('mikrotik.host'),
-            config('mikrotik.port')
-        );
+        $settings = $this->settings();
+
+        return sprintf('%s:%d', $settings->host, $settings->port);
     }
 
     public function isReachable(): bool
@@ -121,13 +126,7 @@ class MikrotikService
      */
     public function measureIncomingBandwidthMbps(): int
     {
-        try {
-            return $this->measureFromInterface();
-        } catch (\Throwable) {
-            $this->resetClient();
-
-            return $this->estimateFromActiveFlows();
-        }
+        return $this->measureFromInterface();
     }
 
     protected function measureFromInterface(): int
@@ -148,21 +147,5 @@ class MikrotikService
         $mbps = (int) ceil($totalBps / 1_000_000);
 
         return max(1, $mbps);
-    }
-
-    /**
-     * Fallback estimate when the router is unreachable (e.g. local dev).
-     */
-    protected function estimateFromActiveFlows(): int
-    {
-        $activeBytes = Flow::where('is_active', true)->sum('bytes');
-
-        if ($activeBytes <= 0) {
-            return 1;
-        }
-
-        $mbps = (int) ceil($activeBytes / 500_000);
-
-        return max(1, min($mbps, 100));
     }
 }

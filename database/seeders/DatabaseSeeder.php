@@ -16,6 +16,7 @@ class DatabaseSeeder extends Seeder
     public function run(): void
     {
         $this->call([
+            MikrotikSettingSeeder::class,
             UserSeeder::class,
             FlowSeeder::class,
             BandwidthLogSeeder::class,

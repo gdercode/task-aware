@@ -20,22 +20,13 @@ class RunBandwidthAllocator extends Command
     ) {
         $this->info('Bandwidth allocator started...');
 
-        $routerReachable = $mikrotik->isReachable();
-
-        if ($routerReachable) {
-            $this->info("MikroTik connected at {$mikrotik->connectionLabel()}");
-        } else {
-            $this->warn("MikroTik unreachable at {$mikrotik->connectionLabel()} — allocations will be logged, queues will not be updated");
-            $this->warn('Check MIKROTIK_HOST, firewall (port 8728), and that API is enabled on the router');
-        }
-
         while (true) {
-            if (! $routerReachable) {
-                $routerReachable = $mikrotik->isReachable();
+            $routerReachable = $mikrotik->isReachable();
 
-                if ($routerReachable) {
-                    $this->info("MikroTik reconnected at {$mikrotik->connectionLabel()}");
-                }
+            if (! $routerReachable) {
+                $this->warn("MikroTik unreachable at {$mikrotik->connectionLabel()} — skipping until connected");
+                sleep(5);
+                continue;
             }
 
             $flows = Flow::with('user')
@@ -50,7 +41,7 @@ class RunBandwidthAllocator extends Command
             $poolMbps = $mikrotik->measureIncomingBandwidthMbps();
             $availableBandwidth = $engine->formatLimit($poolMbps);
 
-            $this->info("Measured pool: {$availableBandwidth}");
+            $this->info("MikroTik connected — measured pool: {$availableBandwidth}");
 
             $scoredUsers = [];
 
@@ -82,17 +73,15 @@ class RunBandwidthAllocator extends Command
                 $shareMbps = $engine->allocateFromPool($score, $totalScore, $poolMbps);
                 $bandwidth = $engine->formatLimit($shareMbps);
 
-                if ($routerReachable) {
-                    $updated = $mikrotik->updateQueue(
-                        $flow->user->name,
-                        $flow->user->ip_address,
-                        $bandwidth
-                    );
+                $updated = $mikrotik->updateQueue(
+                    $flow->user->name,
+                    $flow->user->ip_address,
+                    $bandwidth
+                );
 
-                    if (! $updated) {
-                        $routerReachable = false;
-                        $this->warn("Lost MikroTik connection at {$mikrotik->connectionLabel()} — continuing with logging only");
-                    }
+                if (! $updated) {
+                    $this->warn("Queue update failed — skipping log for {$flow->user->name}");
+                    continue;
                 }
 
                 BandwidthLog::create([
@@ -101,6 +90,7 @@ class RunBandwidthAllocator extends Command
                     'importance_score' => $score,
                     'allocated_bandwidth' => $bandwidth,
                     'available_bandwidth' => $availableBandwidth,
+                    'router_connected' => true,
                 ]);
 
                 $this->info("{$flow->user->name} → {$bandwidth} (score {$score})");

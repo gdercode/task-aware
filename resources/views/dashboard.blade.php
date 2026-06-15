@@ -15,13 +15,20 @@
                 <h1 class="text-xl sm:text-2xl font-semibold text-white">Allocation Dashboard</h1>
             </div>
             <div class="flex items-center gap-3 text-sm text-slate-400">
-                <span class="inline-flex items-center gap-1.5">
-                    <span class="relative flex h-2 w-2">
-                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                        <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                @if ($mikrotikConnected)
+                    <span class="inline-flex items-center gap-1.5">
+                        <span class="relative flex h-2 w-2">
+                            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                            <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                        </span>
+                        Live — MikroTik connected
                     </span>
-                    Live — refreshes every 30s
-                </span>
+                @else
+                    <span class="inline-flex items-center gap-1.5 text-amber-400">
+                        <span class="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                        No live data — router offline
+                    </span>
+                @endif
                 <button onclick="location.reload()" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-medium transition-colors">
                     Refresh now
                 </button>
@@ -30,6 +37,21 @@
     </header>
 
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        @if (session('success'))
+            <div class="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
+                {{ session('success') }}
+            </div>
+        @endif
+
+        @include('partials.mikrotik-settings')
+
+        @unless ($mikrotikConnected)
+            <div class="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+                <strong>No live allocations.</strong> The dashboard only shows users and bandwidth when MikroTik is connected.
+                Allocations come from the router via <code class="text-amber-100">php artisan bandwidth:run</code> — not from old database records.
+            </div>
+        @endunless
+
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
                 <p class="text-sm text-slate-400">Getting Bandwidth</p>
@@ -48,7 +70,7 @@
                     @endif
                 @else
                     <p class="mt-1 text-3xl font-semibold text-slate-500">—</p>
-                    <p class="text-xs text-slate-500 mt-1">Run allocator to measure live bandwidth</p>
+                    <p class="text-xs text-slate-500 mt-1">Connect MikroTik to measure live traffic</p>
                 @endif
             </div>
             <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
@@ -61,7 +83,9 @@
             'title' => 'Getting Bandwidth',
             'users' => $activeUsers,
             'status' => 'active',
-            'emptyMessage' => 'No users are receiving bandwidth right now. Run the allocator while traffic is active.',
+            'emptyMessage' => $mikrotikConnected
+                ? 'No users are receiving bandwidth right now. Run the allocator while MikroTik is connected and traffic is active.'
+                : 'Connect to MikroTik and run the allocator to see live allocations.',
         ])
 
         @include('partials.user-table', [

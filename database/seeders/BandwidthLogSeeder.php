@@ -21,7 +21,7 @@ class BandwidthLogSeeder extends Seeder
         $taskTypes = ['REAL_TIME', 'STREAMING', 'DATA_TRANSFER', 'BULK', 'NORMAL'];
         $users = User::all();
 
-        if ($users->isEmpty()) {
+        if ($users->isEmpty() || ! $monitor->isReachable()) {
             return;
         }
 
@@ -50,6 +50,7 @@ class BandwidthLogSeeder extends Seeder
                 'importance_score' => $entry['score'],
                 'allocated_bandwidth' => $engine->formatLimit($shareMbps),
                 'available_bandwidth' => $availableBandwidth,
+                'router_connected' => false,
                 'created_at' => now()->subMinutes(30 - $i),
                 'updated_at' => now()->subMinutes(30 - $i),
             ]);
