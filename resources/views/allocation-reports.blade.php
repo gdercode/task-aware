@@ -1,6 +1,6 @@
 @extends('layouts.app')
 
-@section('title', 'AL Report — ' . $user->name)
+@section('title', 'Details — ' . $user->name)
 
 @section('content')
 <div class="min-h-screen">
@@ -12,23 +12,60 @@
             </a>
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div>
-                    <p class="text-xs font-medium uppercase tracking-wider text-emerald-400">Allocation Report</p>
+                    <p class="text-xs font-medium uppercase tracking-wider text-emerald-400">More Details</p>
                     <h1 class="text-xl sm:text-2xl font-semibold text-white">{{ $user->name }}</h1>
                     <p class="text-sm text-slate-400 mt-0.5">
                         @include('partials.role-badge', ['role' => $user->role])
                         <span class="ml-2 font-mono text-xs">{{ $user->ip_address }}</span>
                     </p>
                 </div>
-                @if ($taskType)
-                    <span class="inline-flex self-start px-3 py-1 rounded-lg text-sm font-mono bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
-                        Task: {{ $taskType }}
-                    </span>
+                @if ($latestLog)
+                    <div class="self-start rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-4 py-2">
+                        <p class="text-xs text-slate-400">Last allocation</p>
+                        <p class="font-mono text-lg font-semibold text-emerald-400">{{ $latestLog->allocated_bandwidth }}</p>
+                        <p class="text-xs text-slate-500 mt-0.5">{{ $latestLog->created_at->format('M j, Y H:i:s') }}</p>
+                    </div>
                 @endif
             </div>
         </div>
     </header>
 
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+        @if ($activeFlows->isNotEmpty())
+            <div class="rounded-xl border border-emerald-900/50 bg-slate-900 overflow-hidden">
+                <div class="px-5 py-4 border-b border-slate-800">
+                    <h2 class="text-lg font-semibold text-white">Active Tasks</h2>
+                    <p class="text-xs text-slate-500 mt-0.5">{{ $activeFlows->count() }} active flow{{ $activeFlows->count() !== 1 ? 's' : '' }}</p>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="text-left text-slate-400 border-b border-slate-800">
+                                <th class="px-5 py-3 font-medium">Task</th>
+                                <th class="px-5 py-3 font-medium">Destination</th>
+                                <th class="px-5 py-3 font-medium text-right">Score</th>
+                                <th class="px-5 py-3 font-medium text-right">Bytes</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-800">
+                            @foreach ($activeFlows as $flow)
+                                <tr class="hover:bg-slate-800/50 transition-colors">
+                                    <td class="px-5 py-3">
+                                        <span class="inline-flex px-2 py-0.5 rounded text-xs font-mono bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+                                            {{ $flow->classification ?? $flow->task_type }}
+                                        </span>
+                                    </td>
+                                    <td class="px-5 py-3 text-slate-400 truncate max-w-[240px]">{{ $flow->destination ?? '—' }}</td>
+                                    <td class="px-5 py-3 text-right font-mono text-amber-400">{{ $flow->importance_score ?? '—' }}</td>
+                                    <td class="px-5 py-3 text-right font-mono text-slate-400">{{ number_format($flow->bytes) }}</td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        @endif
+
         @if ($taskTypes->count() > 1)
             <div class="flex flex-wrap gap-2">
                 <a href="{{ route('allocation-reports', $user) }}"
@@ -56,9 +93,9 @@
             <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
                 <h2 class="text-lg font-semibold text-white">
                     @if ($taskType)
-                        Report history for <span class="font-mono text-emerald-400">{{ $taskType }}</span>
+                        Allocation history — <span class="font-mono text-emerald-400">{{ $taskType }}</span>
                     @else
-                        Full allocation history
+                        Allocation history
                     @endif
                 </h2>
                 <span class="text-xs text-slate-500">{{ $reports->total() }} entries</span>
@@ -67,7 +104,7 @@
                 @if ($reports->isEmpty())
                     <div class="px-5 py-12 text-center text-slate-500">
                         <p class="text-sm">
-                            No allocation reports found for this user{{ $taskType ? ' and task' : '' }}.
+                            No allocation reports found{{ $taskType ? ' for this task' : '' }}.
                         </p>
                     </div>
                 @else
