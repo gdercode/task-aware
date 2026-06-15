@@ -5,6 +5,7 @@ namespace Database\Seeders;
 use App\Models\BandwidthLog;
 use App\Models\User;
 use App\Services\ImportanceEngineService;
+use App\Services\MikrotikService;
 use Illuminate\Database\Seeder;
 
 class BandwidthLogSeeder extends Seeder
@@ -16,6 +17,7 @@ class BandwidthLogSeeder extends Seeder
         }
 
         $engine = app(ImportanceEngineService::class);
+        $monitor = app(MikrotikService::class);
         $taskTypes = ['REAL_TIME', 'STREAMING', 'DATA_TRANSFER', 'BULK', 'NORMAL'];
         $users = User::all();
 
@@ -23,16 +25,31 @@ class BandwidthLogSeeder extends Seeder
             return;
         }
 
+        $poolMbps = $monitor->measureIncomingBandwidthMbps();
+        $availableBandwidth = $engine->formatLimit($poolMbps);
+
+        $scores = [];
+        foreach ($users as $user) {
+            $taskType = $taskTypes[array_rand($taskTypes)];
+            $scores[$user->id] = [
+                'task_type' => $taskType,
+                'score' => $engine->calculate($user->role, $taskType, rand(0, 2)),
+            ];
+        }
+
+        $totalScore = array_sum(array_column($scores, 'score'));
+
         foreach (range(1, 30) as $i) {
             $user = $users->random();
-            $taskType = $taskTypes[array_rand($taskTypes)];
-            $score = $engine->calculate($user->role, $taskType, rand(0, 2));
+            $entry = $scores[$user->id];
+            $shareMbps = $engine->allocateFromPool($entry['score'], $totalScore, $poolMbps);
 
             BandwidthLog::create([
                 'user_id' => $user->id,
-                'task_type' => $taskType,
-                'importance_score' => $score,
-                'allocated_bandwidth' => $engine->bandwidthFromScore($score),
+                'task_type' => $entry['task_type'],
+                'importance_score' => $entry['score'],
+                'allocated_bandwidth' => $engine->formatLimit($shareMbps),
+                'available_bandwidth' => $availableBandwidth,
                 'created_at' => now()->subMinutes(30 - $i),
                 'updated_at' => now()->subMinutes(30 - $i),
             ]);

@@ -18,43 +18,68 @@ class RunBandwidthAllocator extends Command
         MikrotikService $mikrotik,
         ImportanceEngineService $engine
     ) {
-
-        $this->info("Bandwidth allocator started...");
+        $this->info('Bandwidth allocator started...');
 
         while (true) {
-
             $flows = Flow::with('user')
                 ->where('is_active', true)
                 ->get();
 
-            foreach ($flows as $flow) {
+            if ($flows->isEmpty()) {
+                sleep(5);
+                continue;
+            }
 
+            $poolMbps = $mikrotik->measureIncomingBandwidthMbps();
+            $availableBandwidth = $engine->formatLimit($poolMbps);
+
+            $this->info("Measured pool: {$availableBandwidth}");
+
+            $scoredUsers = [];
+
+            foreach ($flows as $flow) {
                 $score = $engine->calculate(
                     $flow->user->role,
                     $flow->classification,
                     $flow->urgency_weight
                 );
 
-                $bandwidth = $engine->bandwidthFromScore($score);
+                $flow->importance_score = $score;
+                $flow->save();
 
-                // Update MikroTik queue
+                $userId = $flow->user_id;
+
+                if (! isset($scoredUsers[$userId]) || $score > $scoredUsers[$userId]['score']) {
+                    $scoredUsers[$userId] = [
+                        'flow' => $flow,
+                        'score' => $score,
+                    ];
+                }
+            }
+
+            $totalScore = array_sum(array_column($scoredUsers, 'score'));
+
+            foreach ($scoredUsers as $entry) {
+                $flow = $entry['flow'];
+                $score = $entry['score'];
+                $shareMbps = $engine->allocateFromPool($score, $totalScore, $poolMbps);
+                $bandwidth = $engine->formatLimit($shareMbps);
+
                 $mikrotik->updateQueue(
                     $flow->user->name,
                     $flow->user->ip_address,
                     $bandwidth
                 );
 
-                // Save allocation
                 BandwidthLog::create([
                     'user_id' => $flow->user->id,
                     'task_type' => $flow->classification,
                     'importance_score' => $score,
                     'allocated_bandwidth' => $bandwidth,
+                    'available_bandwidth' => $availableBandwidth,
                 ]);
 
-                $this->info(
-                    "{$flow->user->name} → {$bandwidth}"
-                );
+                $this->info("{$flow->user->name} → {$bandwidth} (score {$score})");
             }
 
             sleep(5);

@@ -21,7 +21,6 @@ class DashboardController extends Controller
 
         $activeUsers = collect();
         $inactiveUsers = collect();
-        $totalSharedMbps = 0;
 
         foreach ($users as $user) {
             $latestLog = BandwidthLog::where('user_id', $user->id)->latest()->first();
@@ -31,8 +30,7 @@ class DashboardController extends Controller
                 ?? $topFlow?->importance_score
                 ?? null;
 
-            $bandwidth = $latestLog?->allocated_bandwidth
-                ?? ($score !== null ? $engine->bandwidthFromScore($score) : null);
+            $bandwidth = $latestLog?->allocated_bandwidth;
 
             $row = (object) [
                 'user' => $user,
@@ -44,19 +42,23 @@ class DashboardController extends Controller
             ];
 
             if ($user->active_flows_count > 0) {
-                $totalSharedMbps += $row->bandwidth_mbps;
                 $activeUsers->push($row);
             } else {
                 $inactiveUsers->push($row);
             }
         }
 
+        $latestAvailable = BandwidthLog::whereNotNull('available_bandwidth')
+            ->latest()
+            ->value('available_bandwidth');
+
         $stats = [
             'active_users' => $activeUsers->count(),
             'inactive_users' => $inactiveUsers->count(),
             'active_flows' => Flow::where('is_active', true)->count(),
             'total_reports' => BandwidthLog::count(),
-            'total_shared_bandwidth' => $engine->formatMbpsTotal($totalSharedMbps),
+            'total_available_bandwidth' => $latestAvailable,
+            'total_available_at' => BandwidthLog::whereNotNull('available_bandwidth')->latest()->value('created_at'),
         ];
 
         return view('dashboard', compact('activeUsers', 'inactiveUsers', 'stats'));
@@ -80,16 +82,16 @@ class DashboardController extends Controller
         $activeFlows = Flow::where('user_id', $user->id)
             ->where('is_active', true)
             ->orderByDesc('importance_score')
-            ->get()
-            ->each(function ($flow) use ($engine) {
-                $flow->allocated_bandwidth = $engine->bandwidthFromScore($flow->importance_score ?? 0);
-            });
+            ->get();
 
         $latestLog = BandwidthLog::where('user_id', $user->id)->latest()->first();
 
+        $activeFlows->each(function ($flow) use ($latestLog) {
+            $flow->allocated_bandwidth = $latestLog?->allocated_bandwidth;
+        });
+
         $score = $latestLog?->importance_score ?? $activeFlows->max('importance_score');
-        $bandwidth = $latestLog?->allocated_bandwidth
-            ?? ($score !== null ? $engine->bandwidthFromScore($score) : null);
+        $bandwidth = $latestLog?->allocated_bandwidth;
 
         return view('allocation-reports', compact(
             'user',

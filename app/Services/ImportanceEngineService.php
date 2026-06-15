@@ -61,5 +61,21 @@ class ImportanceEngineService
     {
         return $mbps > 0 ? "{$mbps}M" : '0M';
     }
-}
 
+    public function formatLimit(int $mbps): string
+    {
+        return "{$mbps}M/{$mbps}M";
+    }
+
+    /**
+     * Share the measured pool proportionally by importance score.
+     */
+    public function allocateFromPool(int $score, int $totalScore, int $poolMbps): int
+    {
+        if ($totalScore <= 0 || $poolMbps <= 0) {
+            return 1;
+        }
+
+        return max(1, (int) round(($score / $totalScore) * $poolMbps));
+    }
+}

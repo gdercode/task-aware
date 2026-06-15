@@ -11,6 +11,7 @@ class BandwidthLog extends Model
         'task_type',
         'importance_score',
         'allocated_bandwidth',
+        'available_bandwidth',
     ];
 
     public function user()

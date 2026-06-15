@@ -40,8 +40,16 @@
                 <p class="mt-1 text-3xl font-semibold text-slate-400">{{ number_format($stats['inactive_users']) }}</p>
             </div>
             <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
-                <p class="text-sm text-slate-400">Total Bandwidth Shared</p>
-                <p class="mt-1 text-3xl font-semibold text-emerald-400">{{ $stats['total_shared_bandwidth'] }}</p>
+                <p class="text-sm text-slate-400">Total Bandwidth Available</p>
+                @if ($stats['total_available_bandwidth'])
+                    <p class="mt-1 text-3xl font-semibold text-emerald-400">{{ $stats['total_available_bandwidth'] }}</p>
+                    @if ($stats['total_available_at'])
+                        <p class="text-xs text-slate-500 mt-1">Measured at last allocation · {{ $stats['total_available_at']->format('M j, H:i') }}</p>
+                    @endif
+                @else
+                    <p class="mt-1 text-3xl font-semibold text-slate-500">—</p>
+                    <p class="text-xs text-slate-500 mt-1">Run allocator to measure live bandwidth</p>
+                @endif
             </div>
             <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
                 <p class="text-sm text-slate-400">Total AL Reports</p>

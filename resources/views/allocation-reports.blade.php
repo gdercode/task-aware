@@ -128,7 +128,8 @@
                                 <th class="px-5 py-3 font-medium">Time</th>
                                 <th class="px-5 py-3 font-medium">Task Type</th>
                                 <th class="px-5 py-3 font-medium text-right">Score</th>
-                                <th class="px-5 py-3 font-medium text-right">Bandwidth</th>
+                                <th class="px-5 py-3 font-medium text-right">Allocated</th>
+                                <th class="px-5 py-3 font-medium text-right">Pool Available</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-slate-800">
@@ -140,6 +141,7 @@
                                     </td>
                                     <td class="px-5 py-3 text-right font-mono text-amber-400">{{ $report->importance_score }}</td>
                                     <td class="px-5 py-3 text-right font-mono text-emerald-400 font-medium">{{ $report->allocated_bandwidth }}</td>
+                                    <td class="px-5 py-3 text-right font-mono text-slate-400">{{ $report->available_bandwidth ?? '—' }}</td>
                                 </tr>
                             @endforeach
                         </tbody>

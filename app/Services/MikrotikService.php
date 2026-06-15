@@ -1,26 +1,32 @@
 <?php
 
 namespace App\Services;
+
+use App\Models\Flow;
 use RouterOS\Client;
 use RouterOS\Query;
 
 class MikrotikService
 {
-    protected $client;
+    protected ?Client $client = null;
 
-    public function __construct()
+    protected function getClient(): Client
     {
-        $this->client = new Client([
-            'host' => env('MIKROTIK_HOST'),
-            'user' => env('MIKROTIK_USER'),
-            'pass' => env('MIKROTIK_PASS'),
-            'port' => (int) env('MIKROTIK_PORT', 8728),
-        ]);
+        if ($this->client === null) {
+            $this->client = new Client([
+                'host' => env('MIKROTIK_HOST'),
+                'user' => env('MIKROTIK_USER'),
+                'pass' => env('MIKROTIK_PASS'),
+                'port' => (int) env('MIKROTIK_PORT', 8728),
+            ]);
+        }
+
+        return $this->client;
     }
 
     public function testConnection()
     {
-        return $this->client->query('/system/identity/print')->read();
+        return $this->getClient()->query('/system/identity/print')->read();
     }
 
     public function createQueue($name, $target, $maxLimit)
@@ -30,20 +36,19 @@ class MikrotikService
         $query->equal('target', $target);
         $query->equal('max-limit', $maxLimit);
 
-        return $this->client->query($query)->read();
+        return $this->getClient()->query($query)->read();
     }
 
     public function getConnections()
     {
-        return $this->client
+        return $this->getClient()
             ->query('/ip/firewall/connection/print')
             ->read();
     }
 
     public function updateQueue($name, $target, $maxLimit)
     {
-        // Find existing queue
-        $queues = $this->client
+        $queues = $this->getClient()
             ->query('/queue/simple/print')
             ->read();
 
@@ -56,20 +61,62 @@ class MikrotikService
             }
         }
 
-        // Update existing queue
         if ($queueId) {
-
-            $query = new \RouterOS\Query('/queue/simple/set');
-
+            $query = new Query('/queue/simple/set');
             $query->equal('.id', $queueId);
             $query->equal('max-limit', $maxLimit);
 
-            return $this->client->query($query)->read();
+            return $this->getClient()->query($query)->read();
         }
 
-        // Create queue if not exists
         return $this->createQueue($name, $target, $maxLimit);
     }
 
+    /**
+     * Measure live traffic on the monitored WAN interface (bits/sec → Mbps).
+     */
+    public function measureIncomingBandwidthMbps(): int
+    {
+        try {
+            return $this->measureFromInterface();
+        } catch (\Throwable) {
+            return $this->estimateFromActiveFlows();
+        }
+    }
 
+    protected function measureFromInterface(): int
+    {
+        $interface = config('bandwidth.monitor_interface', 'ether1');
+
+        $query = new Query('/interface/monitor-traffic');
+        $query->equal('interface', $interface);
+        $query->equal('once', '');
+
+        $result = $this->getClient()->query($query)->read();
+        $sample = $result[0] ?? $result;
+
+        $rxBps = (int) ($sample['rx-bits-per-second'] ?? 0);
+        $txBps = (int) ($sample['tx-bits-per-second'] ?? 0);
+
+        $totalBps = $rxBps + $txBps;
+        $mbps = (int) ceil($totalBps / 1_000_000);
+
+        return max(1, $mbps);
+    }
+
+    /**
+     * Fallback estimate when the router is unreachable (e.g. local dev).
+     */
+    protected function estimateFromActiveFlows(): int
+    {
+        $activeBytes = Flow::where('is_active', true)->sum('bytes');
+
+        if ($activeBytes <= 0) {
+            return 1;
+        }
+
+        $mbps = (int) ceil($activeBytes / 500_000);
+
+        return max(1, min($mbps, 100));
+    }
 }
