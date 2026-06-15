@@ -44,9 +44,13 @@ class DashboardController extends Controller
         $allocation = [
             'pool_kbps' => 0,
             'pool_label' => '0k/0k',
+            'pool_display' => '0 Kbps',
             'total_score' => 0,
+            'online_count' => 0,
+            'offline_count' => 0,
             'users' => collect(),
         ];
+        $onlineIps = [];
 
         if ($mikrotikConnected) {
             try {
@@ -55,27 +59,39 @@ class DashboardController extends Controller
                 // Connection can succeed for identity but fail on connection table — continue
             }
 
+            $onlineIps = $mikrotik->tryGetOnlineDeviceIps() ?? [];
+
             $poolKbps = $mikrotik->tryMeasureIncomingBandwidthKbps();
 
             if ($poolKbps === null) {
                 $bandwidthMeasureError = 'Connected to MikroTik but could not measure traffic. Set the correct monitor interface (e.g. ether1, wlan1).';
+                $allocation = $allocationPreview->build(0, $onlineIps);
             } else {
-                $latestAvailable = $engine->formatLimit($poolKbps);
+                $latestAvailable = $engine->formatKbpsDisplay($poolKbps);
                 $totalAvailableAt = now();
-                $allocation = $allocationPreview->build($poolKbps);
+                $allocation = $allocationPreview->build($poolKbps, $onlineIps);
 
                 if ($poolKbps === 0) {
                     $bandwidthMeasureError = 'No traffic on the monitor interface (0 Kbps pool). Allocations will appear when traffic is detected.';
                 }
 
-                $activeUsers = $allocation['users']->filter(fn ($row) => $row->share_kbps > 0)->values();
+                $activeUsers = $allocation['users']
+                    ->filter(fn ($row) => $row->is_online && $row->share_kbps > 0)
+                    ->values();
             }
 
-            $activeUserIds = $allocation['users']->pluck('user.id');
-
             foreach ($users as $user) {
-                if (! $activeUserIds->contains($user->id) && $user->active_flows_count === 0) {
-                    $inactiveUsers->push((object) ['user' => $user]);
+                $row = $allocation['users']->firstWhere('user.id', $user->id);
+                $isGettingBandwidth = $row && $row->is_online && $row->share_kbps > 0;
+
+                if (! $isGettingBandwidth) {
+                    $inactiveUsers->push((object) [
+                        'user' => $user,
+                        'is_online' => $row?->is_online ?? $mikrotik->isDeviceOnline($user->ip_address, $onlineIps),
+                        'share_kbps' => 0,
+                        'kbps_display' => '0 Kbps',
+                        'offline_reason' => ($row && ! $row->is_online) ? 'Device offline' : 'No active traffic',
+                    ]);
                 }
             }
         } else {
@@ -89,6 +105,9 @@ class DashboardController extends Controller
         $stats = [
             'active_users' => $activeUsers->count(),
             'inactive_users' => $inactiveUsers->count(),
+            'online_devices' => $allocation['online_count'] ?? 0,
+            'offline_devices' => $allocation['offline_count'] ?? 0,
+            'pool_kbps' => $allocation['pool_kbps'] ?? 0,
             'active_flows' => Flow::where('is_active', true)->count(),
             'total_reports' => BandwidthLog::where('router_connected', true)->count(),
             'total_available_bandwidth' => $latestAvailable,

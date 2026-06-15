@@ -31,7 +31,8 @@
                         @if ($isActive)
                             <th class="px-5 py-3 font-medium text-right">Score</th>
                             <th class="px-5 py-3 font-medium text-right">Share</th>
-                            <th class="px-5 py-3 font-medium text-right">Bandwidth</th>
+                            <th class="px-5 py-3 font-medium text-right">Kbps</th>
+                            <th class="px-5 py-3 font-medium text-right">Queue</th>
                         @endif
                         <th class="px-5 py-3 font-medium text-right"></th>
                     </tr>
@@ -49,8 +50,12 @@
                             <td class="px-5 py-3">
                                 @if ($isActive)
                                     <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/20 text-emerald-300">Getting bandwidth</span>
+                                @elseif (isset($row->is_online) && ! $row->is_online)
+                                    <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/20 text-red-300">Device offline</span>
                                 @else
-                                    <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-slate-700 text-slate-400">Not using</span>
+                                    <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-slate-700 text-slate-400">
+                                        {{ $row->offline_reason ?? 'Not using' }}
+                                    </span>
                                 @endif
                             </td>
                             @if ($isActive)
@@ -61,14 +66,17 @@
                                     {{ isset($row->share_percent) ? $row->share_percent.'%' : '—' }}
                                 </td>
                                 <td class="px-5 py-3 text-right">
-                                    @if ($row->bandwidth)
-                                        <span class="font-mono text-emerald-400 font-medium">{{ $row->bandwidth }}</span>
-                                        @if ($row->last_seen_at)
-                                            <span class="block text-xs text-slate-500 mt-0.5">{{ $row->last_seen_at->format('M j, H:i') }}</span>
-                                        @endif
-                                    @else
-                                        <span class="text-slate-500">—</span>
+                                    <span class="font-mono font-semibold text-emerald-400">{{ number_format($row->share_kbps ?? 0) }}</span>
+                                    <span class="text-xs text-slate-500"> Kbps</span>
+                                    @if (!empty($row->bandwidth))
+                                        <span class="block text-xs text-slate-500 mt-0.5 font-mono">{{ $row->bandwidth }}</span>
                                     @endif
+                                    @if ($row->last_seen_at ?? null)
+                                        <span class="block text-xs text-slate-500 mt-0.5">{{ $row->last_seen_at->format('M j, H:i') }}</span>
+                                    @endif
+                                </td>
+                                <td class="px-5 py-3 text-right font-mono text-slate-400 text-xs">
+                                    {{ $row->bandwidth ?? '0k/0k' }}
                                 </td>
                             @endif
                             <td class="px-5 py-3 text-right">

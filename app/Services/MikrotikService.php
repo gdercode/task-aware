@@ -81,6 +81,41 @@ class MikrotikService
     }
 
     /**
+     * IPs currently on the network (ARP table + active firewall connections).
+     *
+     * @return array<string, true>|null null when the router query fails
+     */
+    public function tryGetOnlineDeviceIps(): ?array
+    {
+        try {
+            $ips = [];
+
+            foreach ($this->getClient()->query('/ip/arp/print')->read() as $arp) {
+                if ($ip = $arp['address'] ?? null) {
+                    $ips[$ip] = true;
+                }
+            }
+
+            foreach ($this->getConnections() as $conn) {
+                if ($src = $conn['src-address'] ?? null) {
+                    $ips[explode(':', $src)[0]] = true;
+                }
+            }
+
+            return $ips;
+        } catch (\Throwable) {
+            $this->resetClient();
+
+            return null;
+        }
+    }
+
+    public function isDeviceOnline(?string $ip, array $onlineIps): bool
+    {
+        return $ip !== null && $ip !== '' && isset($onlineIps[$ip]);
+    }
+
+    /**
      * Update or create a queue. Returns false when the router is unreachable.
      */
     public function updateQueue($name, $target, $maxLimit): bool

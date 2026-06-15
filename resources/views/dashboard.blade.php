@@ -64,21 +64,31 @@
             </div>
         @endif
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
                 <p class="text-sm text-slate-400">Getting Bandwidth</p>
                 <p class="mt-1 text-3xl font-semibold text-emerald-400">{{ number_format($stats['active_users']) }}</p>
+                <p class="text-xs text-slate-500 mt-1">Online devices with allocation</p>
             </div>
             <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
                 <p class="text-sm text-slate-400">Not Using Bandwidth</p>
                 <p class="mt-1 text-3xl font-semibold text-slate-400">{{ number_format($stats['inactive_users']) }}</p>
+                <p class="text-xs text-slate-500 mt-1">Offline or no traffic</p>
+            </div>
+            <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
+                <p class="text-sm text-slate-400">Devices Online</p>
+                <p class="mt-1 text-3xl font-semibold text-white">{{ number_format($stats['online_devices'] ?? 0) }}</p>
+                @if (($stats['offline_devices'] ?? 0) > 0)
+                    <p class="text-xs text-slate-500 mt-1">{{ number_format($stats['offline_devices']) }} offline</p>
+                @endif
             </div>
             <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
                 <p class="text-sm text-slate-400">Total Bandwidth Available</p>
                 @if ($mikrotikConnected && $stats['total_available_bandwidth'] !== null)
                     <p class="mt-1 text-3xl font-semibold text-emerald-400">{{ $stats['total_available_bandwidth'] }}</p>
+                    <p class="text-xs text-slate-500 mt-1 font-mono">{{ number_format($stats['pool_kbps'] ?? 0) }} Kbps measured</p>
                     @if ($stats['total_available_at'])
-                        <p class="text-xs text-slate-500 mt-1">Measured live · {{ $stats['total_available_at']->format('M j, H:i:s') }}</p>
+                        <p class="text-xs text-slate-500">{{ $stats['total_available_at']->format('M j, H:i:s') }}</p>
                     @endif
                 @else
                     <p class="mt-1 text-3xl font-semibold text-slate-500">—</p>

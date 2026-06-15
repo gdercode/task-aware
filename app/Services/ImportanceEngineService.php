@@ -66,6 +66,11 @@ class ImportanceEngineService
         return $kbps > 0 ? "{$kbps}k" : '0k';
     }
 
+    public function formatKbpsDisplay(int $kbps): string
+    {
+        return number_format($kbps).' Kbps';
+    }
+
     public function formatLimit(int $kbps): string
     {
         return "{$kbps}k/{$kbps}k";
