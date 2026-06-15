@@ -45,6 +45,10 @@
 
         @include('partials.mikrotik-settings')
 
+        @if ($mikrotikConnected && $detection)
+            @include('partials.detection-diagnostics', ['detection' => $detection])
+        @endif
+
         @unless ($mikrotikConnected)
             <div class="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
                 <strong>No live allocations.</strong> The dashboard only shows users and bandwidth when MikroTik is connected.

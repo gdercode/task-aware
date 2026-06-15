@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Services\AllocationPreviewService;
 use App\Services\ImportanceEngineService;
 use App\Services\MikrotikService;
+use App\Services\RouterDeviceDetectionService;
 use App\Services\TrafficDetectionService;
 use App\Services\TrafficSyncService;
 use Carbon\Carbon;
@@ -27,6 +28,7 @@ class DashboardController extends Controller
         TrafficSyncService $trafficSync,
         TrafficDetectionService $detector,
         AllocationPreviewService $allocationPreview,
+        RouterDeviceDetectionService $deviceDetection,
     ): View {
         $mikrotikSettings = MikrotikSetting::current();
         $mikrotikConnected = $mikrotik->isReachable();
@@ -51,9 +53,11 @@ class DashboardController extends Controller
             'users' => collect(),
         ];
         $onlineIps = [];
+        $detection = null;
 
         if ($mikrotikConnected) {
-            $onlineIps = $mikrotik->tryGetOnlineDeviceIps() ?? [];
+            $detection = $deviceDetection->diagnose();
+            $onlineIps = $detection['online_ips'];
 
             try {
                 $trafficSync->syncFromRouter($mikrotik, $detector, $onlineIps);
@@ -133,6 +137,7 @@ class DashboardController extends Controller
             'mikrotikConnected',
             'bandwidthMeasureError',
             'allocation',
+            'detection',
         ));
     }
 

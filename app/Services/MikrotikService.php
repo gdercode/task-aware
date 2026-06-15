@@ -63,6 +63,12 @@ class MikrotikService
         return $this->getClient()->query('/system/identity/print')->read();
     }
 
+    /** Exposed for diagnostics — prefer higher-level API methods in application code. */
+    public function getRouterClient(): Client
+    {
+        return $this->getClient();
+    }
+
     public function createQueue($name, $target, $maxLimit)
     {
         $query = new Query('/queue/simple/add');
@@ -81,42 +87,14 @@ class MikrotikService
     }
 
     /**
-     * IPs currently on the network (ARP table + active firewall connections).
+     * IPs currently on the network (ARP, connections, DHCP, hotspot).
+     * Each source is queried independently so one failure does not block others.
      *
-     * @return array<string, true>|null null when the router query fails
+     * @return array<string, true>
      */
-    public function tryGetOnlineDeviceIps(): ?array
+    public function tryGetOnlineDeviceIps(): array
     {
-        try {
-            $ips = [];
-
-            foreach ($this->getClient()->query('/ip/arp/print')->read() as $arp) {
-                if ($ip = $arp['address'] ?? null) {
-                    $ips[$ip] = true;
-                }
-            }
-
-            foreach ($this->getConnections() as $conn) {
-                if ($src = $conn['src-address'] ?? null) {
-                    $ips[explode(':', $src)[0]] = true;
-                }
-                if ($dst = $conn['dst-address'] ?? null) {
-                    $ips[explode(':', $dst)[0]] = true;
-                }
-            }
-
-            foreach ($this->getClient()->query('/ip/dhcp-server/lease/print')->read() as $lease) {
-                if (($lease['status'] ?? '') === 'bound' && ($ip = $lease['active-address'] ?? $lease['address'] ?? null)) {
-                    $ips[$ip] = true;
-                }
-            }
-
-            return $ips;
-        } catch (\Throwable) {
-            $this->resetClient();
-
-            return null;
-        }
+        return app(RouterDeviceDetectionService::class)->diagnose()['online_ips'];
     }
 
     public function isDeviceOnline(?string $ip, array $onlineIps): bool

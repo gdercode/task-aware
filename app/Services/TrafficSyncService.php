@@ -39,7 +39,7 @@ class TrafficSyncService
                 continue;
             }
 
-            $srcIp = explode(':', $src)[0];
+            $srcIp = $mikrotik->normalizeIp(explode(':', $src)[0]);
             $user = $usersByIp->get($srcIp);
 
             if (! $user) {
