@@ -151,36 +151,146 @@ class MikrotikService
     }
 
     /**
-     * Measure live traffic on the monitored WAN interface (bits/sec → Kbps).
-     * Returns null when measurement fails (e.g. wrong interface name).
+     * Measure the bandwidth pool using interface monitor + firewall connection rates.
+     *
+     * @return array{
+     *     kbps: int,
+     *     interface_kbps: int,
+     *     connection_kbps: int,
+     *     source: string,
+     *     interface: string,
+     *     interface_error: ?string
+     * }
      */
-    public function tryMeasureIncomingBandwidthKbps(): ?int
+    public function measurePoolKbps(): array
+    {
+        $interface = $this->settings()->monitor_interface ?: 'ether1';
+        $interfaceKbps = 0;
+        $interfaceError = null;
+
+        try {
+            $interfaceKbps = $this->measureFromInterface($interface);
+        } catch (\Throwable $e) {
+            $interfaceError = $e->getMessage();
+            $this->resetClient();
+        }
+
+        $connectionKbps = $this->measureFromConnections();
+        $kbps = max($interfaceKbps, $connectionKbps);
+
+        $source = 'none';
+        if ($kbps > 0) {
+            $source = $interfaceKbps >= $connectionKbps ? 'interface' : 'connections';
+        }
+
+        return [
+            'kbps' => $kbps,
+            'interface_kbps' => $interfaceKbps,
+            'connection_kbps' => $connectionKbps,
+            'source' => $source,
+            'interface' => $interface,
+            'interface_error' => $interfaceError,
+        ];
+    }
+
+    /**
+     * @return list<array{name: string, kbps: int|null}>
+     */
+    public function getInterfaceTrafficSamples(): array
     {
         try {
-            return $this->measureFromInterface();
+            $samples = [];
+
+            foreach ($this->getRunningInterfaceNames() as $name) {
+                try {
+                    $samples[] = ['name' => $name, 'kbps' => $this->measureFromInterface($name)];
+                } catch (\Throwable) {
+                    $samples[] = ['name' => $name, 'kbps' => null];
+                }
+            }
+
+            usort($samples, fn ($a, $b) => ($b['kbps'] ?? 0) <=> ($a['kbps'] ?? 0));
+
+            return array_slice($samples, 0, 10);
         } catch (\Throwable) {
             $this->resetClient();
 
+            return [];
+        }
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function getRunningInterfaceNames(): array
+    {
+        $names = [];
+
+        foreach ($this->getClient()->query('/interface/print')->read() as $iface) {
+            $running = $iface['running'] ?? false;
+            if ($running !== 'true' && $running !== true) {
+                continue;
+            }
+
+            $name = $iface['name'] ?? null;
+            if ($name && ! str_contains($name, '<')) {
+                $names[] = $name;
+            }
+        }
+
+        sort($names);
+
+        return $names;
+    }
+
+    /**
+     * Measure live traffic (bits/sec → Kbps). Returns null only when interface query fails.
+     */
+    public function tryMeasureIncomingBandwidthKbps(): ?int
+    {
+        $pool = $this->measurePoolKbps();
+
+        if ($pool['interface_error'] && $pool['kbps'] === 0) {
             return null;
         }
+
+        return $pool['kbps'];
     }
 
     public function measureIncomingBandwidthKbps(): int
     {
-        $kbps = $this->tryMeasureIncomingBandwidthKbps();
+        $pool = $this->measurePoolKbps();
 
-        if ($kbps === null) {
+        if ($pool['interface_error'] && $pool['kbps'] === 0) {
             throw new \RuntimeException(
-                'Could not measure bandwidth on interface '.$this->settings()->monitor_interface
+                'Could not measure bandwidth on interface '.$pool['interface'].': '.$pool['interface_error']
             );
         }
 
-        return $kbps;
+        return $pool['kbps'];
     }
 
-    protected function measureFromInterface(): int
+    protected function measureFromConnections(): int
     {
-        $interface = $this->settings()->monitor_interface ?: 'ether1';
+        try {
+            $totalBps = 0;
+
+            foreach ($this->getConnections() as $conn) {
+                $totalBps += (int) ($conn['orig-rate'] ?? 0);
+                $totalBps += (int) ($conn['repl-rate'] ?? 0);
+            }
+
+            return (int) ceil($totalBps / 1_000);
+        } catch (\Throwable) {
+            $this->resetClient();
+
+            return 0;
+        }
+    }
+
+    protected function measureFromInterface(?string $interface = null): int
+    {
+        $interface = $interface ?: ($this->settings()->monitor_interface ?: 'ether1');
 
         $query = new Query('/interface/monitor-traffic');
         $query->equal('interface', $interface);
@@ -192,8 +302,6 @@ class MikrotikService
         $rxBps = (int) ($sample['rx-bits-per-second'] ?? 0);
         $txBps = (int) ($sample['tx-bits-per-second'] ?? 0);
 
-        $totalBps = $rxBps + $txBps;
-
-        return (int) ceil($totalBps / 1_000);
+        return (int) ceil(($rxBps + $txBps) / 1_000);
     }
 }

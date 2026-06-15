@@ -46,18 +46,18 @@ class RunBandwidthAllocator extends Command
                 $this->warn('Traffic sync failed: '.$e->getMessage());
             }
 
-            $poolKbps = $mikrotik->tryMeasureIncomingBandwidthKbps();
+            $poolMeasure = $mikrotik->measurePoolKbps();
+            $allocation = $allocationPreview->build($poolMeasure['kbps'], $onlineIps);
+            $poolKbps = $allocation['pool_kbps'];
 
-            if ($poolKbps === null || $poolKbps <= 0) {
-                $this->warn('Could not measure bandwidth — check monitor interface in dashboard settings');
+            if ($poolKbps <= 0) {
+                $this->warn('Pool is 0 Kbps — set monitor interface on dashboard or generate client traffic');
                 sleep(5);
                 continue;
             }
 
             $availableBandwidth = $engine->formatLimit($poolKbps);
-            $this->info("Measured pool: {$engine->formatKbpsDisplay($poolKbps)} ({$availableBandwidth})");
-
-            $allocation = $allocationPreview->build($poolKbps, $onlineIps);
+            $this->info("Pool: {$engine->formatKbpsDisplay($poolKbps)} ({$availableBandwidth}) [{$poolMeasure['source']}]");
 
             foreach (User::whereNotNull('ip_address')->get() as $user) {
                 $row = $allocation['users']->first(fn ($r) => $r->user->id === $user->id);

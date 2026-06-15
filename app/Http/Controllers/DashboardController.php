@@ -54,6 +54,8 @@ class DashboardController extends Controller
         ];
         $onlineIps = [];
         $detection = null;
+        $poolMeasure = null;
+        $interfaceTraffic = [];
 
         if ($mikrotikConnected) {
             $detection = $deviceDetection->diagnose();
@@ -65,21 +67,30 @@ class DashboardController extends Controller
                 // Connection can succeed for identity but fail on connection table — continue
             }
 
-            $poolKbps = $mikrotik->tryMeasureIncomingBandwidthKbps();
+            $poolMeasure = $mikrotik->measurePoolKbps();
+            $interfaceTraffic = $mikrotik->getInterfaceTrafficSamples();
+            $poolKbps = $poolMeasure['kbps'];
 
-            if ($poolKbps === null) {
-                $bandwidthMeasureError = 'Connected to MikroTik but could not measure traffic. Set the correct monitor interface (e.g. ether1, wlan1).';
+            if ($poolMeasure['interface_error'] && $poolKbps === 0) {
+                $bandwidthMeasureError = 'Could not read monitor interface "'.$poolMeasure['interface'].'". '
+                    .'Pick a valid interface below (see live traffic per interface).';
                 $allocation = $allocationPreview->build(0, $onlineIps);
             } else {
-                $latestAvailable = $engine->formatKbpsDisplay($poolKbps);
                 $totalAvailableAt = now();
                 $allocation = $allocationPreview->build($poolKbps, $onlineIps);
+                $latestAvailable = $engine->formatKbpsDisplay($allocation['pool_kbps']);
 
-                if ($poolKbps === 0 && ($allocation['total_score'] ?? 0) === 0) {
-                    $bandwidthMeasureError = 'No traffic on the monitor interface (0 Kbps pool). Allocations will appear when traffic is detected.';
-                } elseif ($allocation['pool_using_fallback'] ?? false) {
-                    $bandwidthMeasureError = 'Monitor interface shows 0 Kbps — using minimum pool of '
-                        .config('bandwidth.min_pool_kbps', 64).' Kbps while users are active.';
+                if ($allocation['pool_using_fallback'] ?? false) {
+                    $bandwidthMeasureError = 'Interface "'.$poolMeasure['interface'].'" shows '
+                        .$poolMeasure['interface_kbps'].' Kbps; client connections show '
+                        .$poolMeasure['connection_kbps'].' Kbps — using minimum pool of '
+                        .config('bandwidth.min_pool_kbps', 64).' Kbps for active users.';
+                } elseif ($poolKbps === 0 && ($allocation['total_score'] ?? 0) === 0) {
+                    $bandwidthMeasureError = $this->poolZeroMessage($poolMeasure, $interfaceTraffic, $detection);
+                } elseif ($poolMeasure['source'] === 'connections' && $poolMeasure['interface_kbps'] === 0) {
+                    $bandwidthMeasureError = 'Pool measured from active client connections ('
+                        .$poolMeasure['connection_kbps'].' Kbps). Interface "'.$poolMeasure['interface']
+                        .'" shows 0 — consider setting monitor interface to your LAN/WLAN interface.';
                 }
 
                 $activeUsers = $allocation['users']
@@ -138,7 +149,40 @@ class DashboardController extends Controller
             'bandwidthMeasureError',
             'allocation',
             'detection',
+            'poolMeasure',
+            'interfaceTraffic',
         ));
+    }
+
+    /**
+     * @param  array<string, mixed>  $poolMeasure
+     * @param  list<array{name: string, kbps: int|null}>  $interfaceTraffic
+     * @param  array<string, mixed>  $detection
+     */
+    private function poolZeroMessage(array $poolMeasure, array $interfaceTraffic, array $detection): string
+    {
+        $busy = collect($interfaceTraffic)->filter(fn ($row) => ($row['kbps'] ?? 0) > 0)->take(3);
+        $detectedUsers = collect($detection['users'] ?? [])->where('detected', true)->count();
+
+        $message = 'Bandwidth pool is 0 Kbps. Interface "'.$poolMeasure['interface'].'" has no traffic right now';
+
+        if ($poolMeasure['connection_kbps'] > 0) {
+            $message .= ' (but client connections show '.$poolMeasure['connection_kbps'].' Kbps)';
+        }
+
+        $message .= '.';
+
+        if ($busy->isNotEmpty()) {
+            $message .= ' Interfaces with traffic now: '
+                .$busy->map(fn ($row) => $row['name'].' ('.$row['kbps'].' Kbps)')->implode(', ')
+                .' — set Monitor interface to one of these.';
+        } elseif ($detectedUsers === 0) {
+            $message .= ' No users detected on router — fix user IP addresses first (see detection table above).';
+        } else {
+            $message .= ' Browse on a client device, then refresh. Or pick the LAN/WLAN interface below.';
+        }
+
+        return $message;
     }
 
     public function updateMikrotik(Request $request, MikrotikService $mikrotik): RedirectResponse

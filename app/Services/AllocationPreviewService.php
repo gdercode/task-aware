@@ -41,7 +41,11 @@ class AllocationPreviewService
 
         $totalScore = array_sum($allocatableScores);
 
-        if ($measuredPoolKbps <= 0 && $totalScore > 0) {
+        $eligibleOnline = collect($entries)->filter(
+            fn ($entry) => $entry['is_online'] && in_array($entry['activity_status'], ['active', 'low_usage'], true)
+        )->count();
+
+        if ($measuredPoolKbps <= 0 && ($totalScore > 0 || $eligibleOnline > 0)) {
             $poolKbps = config('bandwidth.min_pool_kbps', 64);
         }
 
