@@ -5,50 +5,82 @@ namespace App\Http\Controllers;
 use App\Models\BandwidthLog;
 use App\Models\Flow;
 use App\Models\User;
-use Illuminate\Support\Facades\DB;
+use App\Services\ImportanceEngineService;
+use Illuminate\Http\Request;
 use Illuminate\View\View;
 
 class DashboardController extends Controller
 {
-    public function index(): View
+    public function index(ImportanceEngineService $engine): View
     {
-        $reports = BandwidthLog::with('user')
-            ->latest()
-            ->limit(100)
+        $users = User::whereNotNull('ip_address')
+            ->with(['flows' => fn ($q) => $q->where('is_active', true)->orderByDesc('importance_score')])
+            ->orderBy('name')
             ->get();
+
+        $activeUsers = collect();
+        $inactiveUsers = collect();
+
+        foreach ($users as $user) {
+            if ($user->flows->isNotEmpty()) {
+                foreach ($user->flows as $flow) {
+                    $taskType = $flow->classification ?? $flow->task_type;
+                    $latestLog = $this->latestLogForTask($user->id, $taskType);
+
+                    $activeUsers->push((object) [
+                        'user' => $user,
+                        'flow' => $flow,
+                        'task_type' => $taskType,
+                        'importance_score' => $latestLog?->importance_score ?? $flow->importance_score,
+                        'allocated_bandwidth' => $latestLog?->allocated_bandwidth
+                            ?? $engine->bandwidthFromScore($flow->importance_score ?? 0),
+                    ]);
+                }
+            } else {
+                $latestLog = BandwidthLog::where('user_id', $user->id)->latest()->first();
+
+                $inactiveUsers->push((object) [
+                    'user' => $user,
+                    'last_task_type' => $latestLog?->task_type,
+                    'last_allocation' => $latestLog?->allocated_bandwidth,
+                    'last_seen_at' => $latestLog?->created_at,
+                ]);
+            }
+        }
 
         $stats = [
-            'total_reports' => BandwidthLog::count(),
+            'active_users' => $activeUsers->unique(fn ($row) => $row->user->id)->count(),
+            'inactive_users' => $inactiveUsers->count(),
             'active_flows' => Flow::where('is_active', true)->count(),
-            'users_monitored' => User::whereNotNull('ip_address')->count(),
-            'latest_allocation' => BandwidthLog::latest()->value('allocated_bandwidth'),
+            'total_reports' => BandwidthLog::count(),
         ];
 
-        $byTaskType = BandwidthLog::query()
-            ->select('task_type', DB::raw('count(*) as total'))
-            ->groupBy('task_type')
-            ->orderByDesc('total')
-            ->get();
+        return view('dashboard', compact('activeUsers', 'inactiveUsers', 'stats'));
+    }
 
-        $byRole = BandwidthLog::query()
-            ->join('users', 'bandwidth_logs.user_id', '=', 'users.id')
-            ->select('users.role', DB::raw('count(*) as total'))
-            ->groupBy('users.role')
-            ->orderByDesc('total')
-            ->get();
+    public function userReports(Request $request, User $user): View
+    {
+        $taskType = $request->query('task_type');
 
-        $activeFlows = Flow::with('user')
-            ->where('is_active', true)
-            ->orderByDesc('importance_score')
-            ->limit(10)
-            ->get();
+        $reports = BandwidthLog::where('user_id', $user->id)
+            ->when($taskType, fn ($q) => $q->where('task_type', $taskType))
+            ->latest()
+            ->paginate(50);
 
-        return view('dashboard', compact(
-            'reports',
-            'stats',
-            'byTaskType',
-            'byRole',
-            'activeFlows',
-        ));
+        $taskTypes = BandwidthLog::where('user_id', $user->id)
+            ->select('task_type')
+            ->distinct()
+            ->orderBy('task_type')
+            ->pluck('task_type');
+
+        return view('allocation-reports', compact('user', 'reports', 'taskType', 'taskTypes'));
+    }
+
+    private function latestLogForTask(int $userId, string $taskType): ?BandwidthLog
+    {
+        return BandwidthLog::where('user_id', $userId)
+            ->where('task_type', $taskType)
+            ->latest()
+            ->first();
     }
 }

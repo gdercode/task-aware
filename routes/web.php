@@ -19,6 +19,9 @@ Route::get('/test-mikrotik', function (MikrotikService $mikrotik) {
 
 Route::get('/', [DashboardController::class, 'index'])->name('dashboard');
 
+Route::get('/users/{user}/allocation-reports', [DashboardController::class, 'userReports'])
+    ->name('allocation-reports');
+
 Route::get('/api/allocation-reports', function () {
     return BandwidthLog::with('user')
         ->latest()
