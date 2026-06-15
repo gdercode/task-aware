@@ -20,7 +20,24 @@ class RunBandwidthAllocator extends Command
     ) {
         $this->info('Bandwidth allocator started...');
 
+        $routerReachable = $mikrotik->isReachable();
+
+        if ($routerReachable) {
+            $this->info("MikroTik connected at {$mikrotik->connectionLabel()}");
+        } else {
+            $this->warn("MikroTik unreachable at {$mikrotik->connectionLabel()} — allocations will be logged, queues will not be updated");
+            $this->warn('Check MIKROTIK_HOST, firewall (port 8728), and that API is enabled on the router');
+        }
+
         while (true) {
+            if (! $routerReachable) {
+                $routerReachable = $mikrotik->isReachable();
+
+                if ($routerReachable) {
+                    $this->info("MikroTik reconnected at {$mikrotik->connectionLabel()}");
+                }
+            }
+
             $flows = Flow::with('user')
                 ->where('is_active', true)
                 ->get();
@@ -65,11 +82,18 @@ class RunBandwidthAllocator extends Command
                 $shareMbps = $engine->allocateFromPool($score, $totalScore, $poolMbps);
                 $bandwidth = $engine->formatLimit($shareMbps);
 
-                $mikrotik->updateQueue(
-                    $flow->user->name,
-                    $flow->user->ip_address,
-                    $bandwidth
-                );
+                if ($routerReachable) {
+                    $updated = $mikrotik->updateQueue(
+                        $flow->user->name,
+                        $flow->user->ip_address,
+                        $bandwidth
+                    );
+
+                    if (! $updated) {
+                        $routerReachable = false;
+                        $this->warn("Lost MikroTik connection at {$mikrotik->connectionLabel()} — continuing with logging only");
+                    }
+                }
 
                 BandwidthLog::create([
                     'user_id' => $flow->user->id,

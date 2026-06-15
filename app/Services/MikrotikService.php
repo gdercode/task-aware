@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Flow;
 use RouterOS\Client;
+use RouterOS\Exceptions\ConnectException;
 use RouterOS\Query;
 
 class MikrotikService
@@ -14,14 +15,42 @@ class MikrotikService
     {
         if ($this->client === null) {
             $this->client = new Client([
-                'host' => env('MIKROTIK_HOST'),
-                'user' => env('MIKROTIK_USER'),
-                'pass' => env('MIKROTIK_PASS'),
-                'port' => (int) env('MIKROTIK_PORT', 8728),
+                'host' => config('mikrotik.host'),
+                'user' => config('mikrotik.user'),
+                'pass' => config('mikrotik.pass'),
+                'port' => config('mikrotik.port'),
+                'timeout' => config('mikrotik.timeout'),
             ]);
         }
 
         return $this->client;
+    }
+
+    public function resetClient(): void
+    {
+        $this->client = null;
+    }
+
+    public function connectionLabel(): string
+    {
+        return sprintf(
+            '%s:%d',
+            config('mikrotik.host'),
+            config('mikrotik.port')
+        );
+    }
+
+    public function isReachable(): bool
+    {
+        try {
+            $this->getClient()->query('/system/identity/print')->read();
+
+            return true;
+        } catch (\Throwable) {
+            $this->resetClient();
+
+            return false;
+        }
     }
 
     public function testConnection()
@@ -46,30 +75,45 @@ class MikrotikService
             ->read();
     }
 
-    public function updateQueue($name, $target, $maxLimit)
+    /**
+     * Update or create a queue. Returns false when the router is unreachable.
+     */
+    public function updateQueue($name, $target, $maxLimit): bool
     {
-        $queues = $this->getClient()
-            ->query('/queue/simple/print')
-            ->read();
+        try {
+            $queues = $this->getClient()
+                ->query('/queue/simple/print')
+                ->read();
 
-        $queueId = null;
+            $queueId = null;
 
-        foreach ($queues as $queue) {
-            if (($queue['name'] ?? '') === $name) {
-                $queueId = $queue['.id'];
-                break;
+            foreach ($queues as $queue) {
+                if (($queue['name'] ?? '') === $name) {
+                    $queueId = $queue['.id'];
+                    break;
+                }
             }
+
+            if ($queueId) {
+                $query = new Query('/queue/simple/set');
+                $query->equal('.id', $queueId);
+                $query->equal('max-limit', $maxLimit);
+
+                $this->getClient()->query($query)->read();
+            } else {
+                $this->createQueue($name, $target, $maxLimit);
+            }
+
+            return true;
+        } catch (ConnectException $e) {
+            $this->resetClient();
+
+            return false;
+        } catch (\Throwable $e) {
+            $this->resetClient();
+
+            throw $e;
         }
-
-        if ($queueId) {
-            $query = new Query('/queue/simple/set');
-            $query->equal('.id', $queueId);
-            $query->equal('max-limit', $maxLimit);
-
-            return $this->getClient()->query($query)->read();
-        }
-
-        return $this->createQueue($name, $target, $maxLimit);
     }
 
     /**
@@ -80,6 +124,8 @@ class MikrotikService
         try {
             return $this->measureFromInterface();
         } catch (\Throwable) {
+            $this->resetClient();
+
             return $this->estimateFromActiveFlows();
         }
     }
