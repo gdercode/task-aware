@@ -24,7 +24,9 @@ class TrafficSyncService
         array $onlineIps = [],
     ): array {
         $connections = $mikrotik->getConnections();
-        $usersByIp = User::whereNotNull('ip_address')->get()->keyBy('ip_address');
+        $usersByIp = User::whereNotNull('ip_address')
+            ->get()
+            ->keyBy(fn (User $user) => $mikrotik->normalizeIp($user->ip_address));
         $userBytes = [];
         $seenUserIds = [];
         $synced = 0;
@@ -90,8 +92,9 @@ class TrafficSyncService
         foreach ($usersByIp as $user) {
             $isOnline = $mikrotik->isDeviceOnline($user->ip_address, $onlineIps);
             $bytes = $userBytes[$user->id] ?? 0;
+            $hadConnections = isset($seenUserIds[$user->id]);
 
-            $this->activity->evaluate($user, $bytes, $isOnline);
+            $this->activity->evaluate($user, $bytes, $isOnline, $hadConnections);
         }
 
         return [

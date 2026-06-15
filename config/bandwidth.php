@@ -25,10 +25,22 @@ return [
     |
     */
 
-    'idle_seconds' => (int) env('BANDWIDTH_IDLE_SECONDS', 45),
+    'idle_seconds' => (int) env('BANDWIDTH_IDLE_SECONDS', 90),
 
-    'low_usage_bytes' => (int) env('BANDWIDTH_LOW_USAGE_BYTES', 4096),
+    'low_usage_bytes' => (int) env('BANDWIDTH_LOW_USAGE_BYTES', 256),
 
-    'active_usage_bytes' => (int) env('BANDWIDTH_ACTIVE_USAGE_BYTES', 16384),
+    'active_usage_bytes' => (int) env('BANDWIDTH_ACTIVE_USAGE_BYTES', 1024),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Minimum pool (Kbps)
+    |--------------------------------------------------------------------------
+    |
+    | When the monitor interface reports 0 Kbps but users are online and active,
+    | use this floor so allocations can still be calculated on low/slow links.
+    |
+    */
+
+    'min_pool_kbps' => (int) env('BANDWIDTH_MIN_POOL_KBPS', 64),
 
 ];

@@ -15,7 +15,7 @@ class UserActivityService
     /**
      * @return array{status: string, base_score: int, effective_score: int, bytes_delta: int, task_type: ?string}
      */
-    public function evaluate(User $user, int $connectionBytes, bool $isOnline): array
+    public function evaluate(User $user, int $connectionBytes, bool $isOnline, bool $hadConnections = false): array
     {
         if (! $isOnline) {
             $this->markOffline($user);
@@ -31,6 +31,12 @@ class UserActivityService
 
         $baseScore = $this->bestActiveFlowScore($user);
         $taskType = $this->bestActiveFlowTaskType($user);
+
+        if ($hadConnections && $baseScore === 0) {
+            $baseScore = $this->engine->calculate($user->role, 'NORMAL', 1);
+            $taskType = 'NORMAL';
+        }
+
         $previousBytes = (int) $user->last_traffic_bytes;
         $delta = $connectionBytes - $previousBytes;
 
@@ -39,21 +45,16 @@ class UserActivityService
         }
 
         $delta = max(0, $delta);
-        $status = $this->resolveActivityStatus($user, $delta);
+        $status = $this->resolveActivityStatus($user, $delta, $hadConnections);
         $effectiveScore = $this->engine->effectiveScore($baseScore, $status, $user->role);
 
-        if ($status === 'offline') {
-            $baseScore = 0;
-            $taskType = null;
-            $this->deactivateUserFlows($user);
-        } elseif ($status === 'idle') {
+        if ($status === 'idle') {
             $effectiveScore = 0;
-            $this->deactivateUserFlows($user);
         }
 
         $user->update([
             'last_traffic_bytes' => $connectionBytes,
-            'last_active_at' => $delta > 0 ? now() : $user->last_active_at,
+            'last_active_at' => ($delta > 0 || $hadConnections) ? now() : $user->last_active_at,
             'activity_status' => $status,
             'base_score' => $baseScore,
             'effective_score' => $effectiveScore,
@@ -62,7 +63,7 @@ class UserActivityService
 
         Flow::where('user_id', $user->id)
             ->where('is_active', true)
-            ->update(['importance_score' => $effectiveScore]);
+            ->update(['importance_score' => $effectiveScore > 0 ? $baseScore : 0]);
 
         return [
             'status' => $status,
@@ -73,13 +74,17 @@ class UserActivityService
         ];
     }
 
-    protected function resolveActivityStatus(User $user, int $delta): string
+    protected function resolveActivityStatus(User $user, int $delta, bool $hadConnections): string
     {
-        if ($delta >= config('bandwidth.active_usage_bytes', 16384)) {
+        if ($delta >= config('bandwidth.active_usage_bytes', 1024)) {
             return 'active';
         }
 
-        if ($delta >= config('bandwidth.low_usage_bytes', 4096)) {
+        if ($hadConnections) {
+            return $delta > 0 ? 'low_usage' : 'active';
+        }
+
+        if ($delta >= config('bandwidth.low_usage_bytes', 256)) {
             return 'low_usage';
         }
 
@@ -87,14 +92,16 @@ class UserActivityService
             return 'low_usage';
         }
 
-        $idleSeconds = config('bandwidth.idle_seconds', 45);
+        $idleSeconds = config('bandwidth.idle_seconds', 90);
         $lastActive = $user->last_active_at;
 
         if (! $lastActive || $lastActive->diffInSeconds(now()) >= $idleSeconds) {
             return 'idle';
         }
 
-        return $user->activity_status === 'low_usage' ? 'low_usage' : 'active';
+        return in_array($user->activity_status, ['active', 'low_usage'], true)
+            ? $user->activity_status
+            : 'active';
     }
 
     protected function bestActiveFlowScore(User $user): int

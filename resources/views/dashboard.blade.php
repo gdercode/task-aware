@@ -58,7 +58,21 @@
             </div>
         @endif
 
-        @if ($mikrotikConnected && empty($bandwidthMeasureError) && $stats['active_users'] === 0 && $stats['active_flows'] === 0)
+        @if ($mikrotikConnected && empty($bandwidthMeasureError) && $stats['active_users'] === 0 && ($stats['online_devices'] ?? 0) > 0)
+            <div class="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+                <strong>{{ $stats['online_devices'] }} device(s) online</strong> but none are receiving bandwidth yet.
+                Check the <em>Live allocation breakdown</em> below for each user's activity status.
+                Users need matching IP addresses and active internet connections on MikroTik.
+                @if (($stats['activity']['offline'] ?? 0) > 0)
+                    <span class="block mt-1">{{ $stats['activity']['offline'] }} marked offline — verify IPs in Users match router ARP/DHCP.</span>
+                @endif
+                @if (($stats['activity']['idle'] ?? 0) > 0)
+                    <span class="block mt-1">{{ $stats['activity']['idle'] }} idle — no recent traffic detected.</span>
+                @endif
+            </div>
+        @endif
+
+        @if ($mikrotikConnected && empty($bandwidthMeasureError) && $stats['active_users'] === 0 && ($stats['online_devices'] ?? 0) === 0 && $users->isNotEmpty())
             <div class="rounded-lg border border-slate-700 bg-slate-800/50 px-4 py-3 text-sm text-slate-300">
                 MikroTik is connected but no monitored user traffic was detected. Ensure user IP addresses match active connections on the router, then run <code class="text-emerald-300">php artisan bandwidth:run</code>.
             </div>
@@ -112,7 +126,7 @@
             'users' => $activeUsers,
             'status' => 'active',
             'emptyMessage' => $mikrotikConnected
-                ? 'No users are receiving bandwidth right now. Run the allocator while MikroTik is connected and traffic is active.'
+                ? 'No users receiving bandwidth. See the allocation breakdown above — users may be offline, idle, or have IP mismatches.'
                 : 'Connect to MikroTik and run the allocator to see live allocations.',
         ])
 

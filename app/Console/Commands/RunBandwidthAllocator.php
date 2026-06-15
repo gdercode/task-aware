@@ -60,7 +60,7 @@ class RunBandwidthAllocator extends Command
             $allocation = $allocationPreview->build($poolKbps, $onlineIps);
 
             foreach (User::whereNotNull('ip_address')->get() as $user) {
-                $row = $allocation['users']->firstWhere('user.id', $user->id);
+                $row = $allocation['users']->first(fn ($r) => $r->user->id === $user->id);
                 $shareKbps = $row->share_kbps ?? 0;
                 $isOnline = $row->is_online ?? false;
                 $status = $row->activity_status ?? 'unknown';

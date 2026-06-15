@@ -71,8 +71,11 @@ class DashboardController extends Controller
                 $totalAvailableAt = now();
                 $allocation = $allocationPreview->build($poolKbps, $onlineIps);
 
-                if ($poolKbps === 0) {
+                if ($poolKbps === 0 && ($allocation['total_score'] ?? 0) === 0) {
                     $bandwidthMeasureError = 'No traffic on the monitor interface (0 Kbps pool). Allocations will appear when traffic is detected.';
+                } elseif ($allocation['pool_using_fallback'] ?? false) {
+                    $bandwidthMeasureError = 'Monitor interface shows 0 Kbps — using minimum pool of '
+                        .config('bandwidth.min_pool_kbps', 64).' Kbps while users are active.';
                 }
 
                 $activeUsers = $allocation['users']
@@ -81,7 +84,7 @@ class DashboardController extends Controller
             }
 
             foreach ($users as $user) {
-                $row = $allocation['users']->firstWhere('user.id', $user->id);
+                $row = $allocation['users']->first(fn ($r) => $r->user->id === $user->id);
                 $isGettingBandwidth = $row && $row->is_online && $row->share_kbps > 0;
 
                 if (! $isGettingBandwidth) {
@@ -124,6 +127,7 @@ class DashboardController extends Controller
         return view('dashboard', compact(
             'activeUsers',
             'inactiveUsers',
+            'users',
             'stats',
             'mikrotikSettings',
             'mikrotikConnected',

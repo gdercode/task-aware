@@ -100,6 +100,15 @@ class MikrotikService
                 if ($src = $conn['src-address'] ?? null) {
                     $ips[explode(':', $src)[0]] = true;
                 }
+                if ($dst = $conn['dst-address'] ?? null) {
+                    $ips[explode(':', $dst)[0]] = true;
+                }
+            }
+
+            foreach ($this->getClient()->query('/ip/dhcp-server/lease/print')->read() as $lease) {
+                if (($lease['status'] ?? '') === 'bound' && ($ip = $lease['active-address'] ?? $lease['address'] ?? null)) {
+                    $ips[$ip] = true;
+                }
             }
 
             return $ips;
@@ -112,7 +121,14 @@ class MikrotikService
 
     public function isDeviceOnline(?string $ip, array $onlineIps): bool
     {
-        return $ip !== null && $ip !== '' && isset($onlineIps[$ip]);
+        $ip = trim((string) $ip);
+
+        return $ip !== '' && isset($onlineIps[$ip]);
+    }
+
+    public function normalizeIp(?string $ip): string
+    {
+        return trim((string) $ip);
     }
 
     /**
