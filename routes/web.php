@@ -6,6 +6,7 @@ use App\Services\MikrotikService;
 use App\Services\TrafficDetectionService;
 use App\Services\ImportanceEngineService;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\UserController;
 use App\Models\BandwidthLog;
 use App\Models\Flow;
 use App\Models\User;
@@ -24,6 +25,8 @@ Route::post('/mikrotik-settings', [DashboardController::class, 'updateMikrotik']
 
 Route::get('/users/{user}/allocation-reports', [DashboardController::class, 'userReports'])
     ->name('allocation-reports');
+
+Route::resource('users', UserController::class)->except(['show']);
 
 Route::get('/api/allocation-reports', function () {
     return BandwidthLog::with('user')

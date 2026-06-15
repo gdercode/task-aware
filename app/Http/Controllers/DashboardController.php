@@ -6,8 +6,11 @@ use App\Models\BandwidthLog;
 use App\Models\Flow;
 use App\Models\MikrotikSetting;
 use App\Models\User;
+use App\Services\AllocationPreviewService;
 use App\Services\ImportanceEngineService;
 use App\Services\MikrotikService;
+use App\Services\TrafficDetectionService;
+use App\Services\TrafficSyncService;
 use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -16,12 +19,18 @@ use Illuminate\View\View;
 
 class DashboardController extends Controller
 {
-    private const ALLOCATION_CYCLE_SECONDS = 15;
+    private const ALLOCATION_CYCLE_SECONDS = 120;
 
-    public function index(ImportanceEngineService $engine, MikrotikService $mikrotik): View
-    {
+    public function index(
+        ImportanceEngineService $engine,
+        MikrotikService $mikrotik,
+        TrafficSyncService $trafficSync,
+        TrafficDetectionService $detector,
+        AllocationPreviewService $allocationPreview,
+    ): View {
         $mikrotikSettings = MikrotikSetting::current();
         $mikrotikConnected = $mikrotik->isReachable();
+        $bandwidthMeasureError = null;
 
         $users = User::whereNotNull('ip_address')
             ->withCount(['flows as active_flows_count' => fn ($q) => $q->where('is_active', true)])
@@ -30,55 +39,53 @@ class DashboardController extends Controller
 
         $activeUsers = collect();
         $inactiveUsers = collect();
+        $latestAvailable = null;
+        $totalAvailableAt = null;
 
         if ($mikrotikConnected) {
-            $cycleStart = $this->latestAllocationCycleStart();
-            $gettingBandwidthIds = $this->usersGettingBandwidth($cycleStart);
+            try {
+                $trafficSync->syncFromRouter($mikrotik, $detector);
+            } catch (\Throwable) {
+                // Connection can succeed for identity but fail on connection table — continue
+            }
 
-            foreach ($users as $user) {
-                $isGettingBandwidth = $gettingBandwidthIds->contains($user->id);
-                $isUsingBandwidth = $user->active_flows_count > 0;
+            $poolMbps = $mikrotik->tryMeasureIncomingBandwidthMbps();
 
-                if ($isGettingBandwidth) {
-                    $cycleLog = BandwidthLog::where('user_id', $user->id)
-                        ->where('router_connected', true)
-                        ->when($cycleStart, fn ($q) => $q->where('created_at', '>=', $cycleStart))
-                        ->latest()
-                        ->first();
+            if ($poolMbps !== null) {
+                $latestAvailable = $engine->formatLimit($poolMbps);
+                $totalAvailableAt = now();
+                $activeUsers = $allocationPreview->forActiveFlows($poolMbps);
+            } else {
+                $bandwidthMeasureError = 'Connected to MikroTik but could not measure traffic. Set the correct monitor interface (e.g. ether1, wlan1).';
+            }
 
-                    $activeUsers->push((object) [
-                        'user' => $user,
-                        'score' => $cycleLog?->importance_score,
-                        'bandwidth' => $cycleLog?->allocated_bandwidth,
-                        'last_seen_at' => $cycleLog?->created_at,
-                    ]);
-                } elseif (! $isUsingBandwidth) {
-                    $inactiveUsers->push((object) [
-                        'user' => $user,
-                    ]);
+            // Prefer recent live allocation logs from the allocator when available
+            $loggedUsers = $this->usersFromRecentLogs($engine);
+            if ($loggedUsers->isNotEmpty()) {
+                $activeUsers = $loggedUsers;
+                $latestLog = BandwidthLog::where('router_connected', true)
+                    ->whereNotNull('available_bandwidth')
+                    ->latest()
+                    ->first();
+                if ($latestLog) {
+                    $latestAvailable = $latestLog->available_bandwidth;
+                    $totalAvailableAt = $latestLog->created_at;
                 }
             }
 
-            $latestAvailable = BandwidthLog::where('router_connected', true)
-                ->whereNotNull('available_bandwidth')
-                ->latest()
-                ->value('available_bandwidth');
+            $activeUserIds = $activeUsers->pluck('user.id');
 
-            $totalAvailableAt = BandwidthLog::where('router_connected', true)
-                ->whereNotNull('available_bandwidth')
-                ->latest()
-                ->value('created_at');
+            foreach ($users as $user) {
+                if (! $activeUserIds->contains($user->id) && $user->active_flows_count === 0) {
+                    $inactiveUsers->push((object) ['user' => $user]);
+                }
+            }
         } else {
             foreach ($users as $user) {
                 if ($user->active_flows_count === 0) {
-                    $inactiveUsers->push((object) [
-                        'user' => $user,
-                    ]);
+                    $inactiveUsers->push((object) ['user' => $user]);
                 }
             }
-
-            $latestAvailable = null;
-            $totalAvailableAt = null;
         }
 
         $stats = [
@@ -96,6 +103,7 @@ class DashboardController extends Controller
             'stats',
             'mikrotikSettings',
             'mikrotikConnected',
+            'bandwidthMeasureError',
         ));
     }
 
@@ -104,6 +112,7 @@ class DashboardController extends Controller
         $validated = $request->validate([
             'host' => ['required', 'string', 'max:255'],
             'port' => ['required', 'integer', 'min:1', 'max:65535'],
+            'monitor_interface' => ['required', 'string', 'max:64'],
         ]);
 
         $settings = MikrotikSetting::current();
@@ -113,7 +122,7 @@ class DashboardController extends Controller
 
         return redirect()
             ->route('dashboard')
-            ->with('success', 'MikroTik address updated to '.$settings->host.':'.$settings->port);
+            ->with('success', 'MikroTik settings saved.');
     }
 
     public function userReports(Request $request, User $user, MikrotikService $mikrotik): View
@@ -141,26 +150,20 @@ class DashboardController extends Controller
 
         $cycleStart = $this->latestAllocationCycleStart();
         $isGettingBandwidth = $mikrotikConnected
-            && $this->usersGettingBandwidth($cycleStart)->contains($user->id);
+            && ($this->usersGettingBandwidth($cycleStart)->contains($user->id) || $activeFlows->isNotEmpty());
         $isUsingBandwidth = $activeFlows->isNotEmpty();
 
-        $latestLog = $isGettingBandwidth
-            ? BandwidthLog::where('user_id', $user->id)
-                ->where('router_connected', true)
-                ->when($cycleStart, fn ($q) => $q->where('created_at', '>=', $cycleStart))
-                ->latest()
-                ->first()
-            : BandwidthLog::where('user_id', $user->id)
-                ->where('router_connected', true)
-                ->latest()
-                ->first();
+        $latestLog = BandwidthLog::where('user_id', $user->id)
+            ->where('router_connected', true)
+            ->latest()
+            ->first();
 
         $activeFlows->each(function ($flow) use ($latestLog, $isGettingBandwidth) {
             $flow->allocated_bandwidth = $isGettingBandwidth ? $latestLog?->allocated_bandwidth : null;
         });
 
-        $score = $isGettingBandwidth ? $latestLog?->importance_score : null;
-        $bandwidth = $isGettingBandwidth ? $latestLog?->allocated_bandwidth : null;
+        $score = $latestLog?->importance_score;
+        $bandwidth = $latestLog?->allocated_bandwidth;
 
         return view('allocation-reports', compact(
             'user',
@@ -175,6 +178,37 @@ class DashboardController extends Controller
             'isUsingBandwidth',
             'mikrotikConnected',
         ));
+    }
+
+    private function usersFromRecentLogs(ImportanceEngineService $engine): Collection
+    {
+        $cycleStart = $this->latestAllocationCycleStart();
+
+        if (! $cycleStart) {
+            return collect();
+        }
+
+        $userIds = $this->usersGettingBandwidth($cycleStart);
+
+        return $userIds->map(function ($userId) use ($cycleStart) {
+            $log = BandwidthLog::with('user')
+                ->where('user_id', $userId)
+                ->where('router_connected', true)
+                ->where('created_at', '>=', $cycleStart)
+                ->latest()
+                ->first();
+
+            if (! $log) {
+                return null;
+            }
+
+            return (object) [
+                'user' => $log->user,
+                'score' => $log->importance_score,
+                'bandwidth' => $log->allocated_bandwidth,
+                'last_seen_at' => $log->created_at,
+            ];
+        })->filter()->values();
     }
 
     private function latestAllocationCycleStart(): ?Carbon

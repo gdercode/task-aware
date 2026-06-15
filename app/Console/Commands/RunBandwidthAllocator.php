@@ -38,7 +38,14 @@ class RunBandwidthAllocator extends Command
                 continue;
             }
 
-            $poolMbps = $mikrotik->measureIncomingBandwidthMbps();
+            $poolMbps = $mikrotik->tryMeasureIncomingBandwidthMbps();
+
+            if ($poolMbps === null) {
+                $this->warn('Could not measure bandwidth — check monitor interface in dashboard settings');
+                sleep(5);
+                continue;
+            }
+
             $availableBandwidth = $engine->formatLimit($poolMbps);
 
             $this->info("MikroTik connected — measured pool: {$availableBandwidth}");

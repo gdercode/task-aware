@@ -56,8 +56,23 @@
                     <p class="text-xs text-red-400 mt-1">{{ $message }}</p>
                 @enderror
             </div>
+            <div>
+                <label for="monitor_interface" class="block text-xs font-medium text-slate-400 mb-1">Monitor interface</label>
+                <input
+                    type="text"
+                    name="monitor_interface"
+                    id="monitor_interface"
+                    value="{{ old('monitor_interface', $mikrotikSettings->monitor_interface ?? 'ether1') }}"
+                    required
+                    class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                    placeholder="ether1"
+                >
+                @error('monitor_interface')
+                    <p class="text-xs text-red-400 mt-1">{{ $message }}</p>
+                @enderror
+            </div>
             <button type="submit" class="w-full px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium transition-colors">
-                Save MikroTik address
+                Save MikroTik settings
             </button>
         </form>
     </div>

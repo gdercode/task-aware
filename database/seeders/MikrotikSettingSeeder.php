@@ -12,6 +12,7 @@ class MikrotikSettingSeeder extends Seeder
         MikrotikSetting::firstOrCreate([], [
             'host' => config('mikrotik.host'),
             'port' => config('mikrotik.port'),
+            'monitor_interface' => config('bandwidth.monitor_interface', 'ether1'),
         ]);
     }
 }

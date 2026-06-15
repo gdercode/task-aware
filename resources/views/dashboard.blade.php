@@ -8,7 +8,7 @@
 
 @section('content')
 <div class="min-h-screen">
-    <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur-sm sticky top-0 z-10">
+    <header class="border-b border-slate-800 bg-slate-900/50">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
                 <p class="text-xs font-medium uppercase tracking-wider text-emerald-400">Task-Aware Bandwidth</p>
@@ -52,6 +52,18 @@
             </div>
         @endunless
 
+        @if ($mikrotikConnected && !empty($bandwidthMeasureError))
+            <div class="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+                {{ $bandwidthMeasureError }}
+            </div>
+        @endif
+
+        @if ($mikrotikConnected && empty($bandwidthMeasureError) && $stats['active_users'] === 0 && $stats['active_flows'] === 0)
+            <div class="rounded-lg border border-slate-700 bg-slate-800/50 px-4 py-3 text-sm text-slate-300">
+                MikroTik is connected but no monitored user traffic was detected. Ensure user IP addresses match active connections on the router, then run <code class="text-emerald-300">php artisan bandwidth:run</code>.
+            </div>
+        @endif
+
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
                 <p class="text-sm text-slate-400">Getting Bandwidth</p>
@@ -66,7 +78,7 @@
                 @if ($stats['total_available_bandwidth'])
                     <p class="mt-1 text-3xl font-semibold text-emerald-400">{{ $stats['total_available_bandwidth'] }}</p>
                     @if ($stats['total_available_at'])
-                        <p class="text-xs text-slate-500 mt-1">Measured at last allocation · {{ $stats['total_available_at']->format('M j, H:i') }}</p>
+                        <p class="text-xs text-slate-500 mt-1">Measured live · {{ $stats['total_available_at']->format('M j, H:i:s') }}</p>
                     @endif
                 @else
                     <p class="mt-1 text-3xl font-semibold text-slate-500">—</p>
