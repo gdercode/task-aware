@@ -57,6 +57,11 @@ class User extends Authenticatable
         return $this->hasMany(Allocation::class);
     }
 
+    public function bandwidthLogs()
+    {
+        return $this->hasMany(BandwidthLog::class);
+    }
+
     public function getUserByIp($ip)
     {
         return \App\Models\User::where('ip_address', $ip)->first();

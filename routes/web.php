@@ -5,6 +5,8 @@ use RouterOS\Client;
 use App\Services\MikrotikService;
 use App\Services\TrafficDetectionService;
 use App\Services\ImportanceEngineService;
+use App\Http\Controllers\DashboardController;
+use App\Models\BandwidthLog;
 use App\Models\Flow;
 use App\Models\User;
 
@@ -15,8 +17,13 @@ Route::get('/test-mikrotik', function (MikrotikService $mikrotik) {
 
 
 
-Route::get('/', function () {
-    return view('welcome');
+Route::get('/', [DashboardController::class, 'index'])->name('dashboard');
+
+Route::get('/api/allocation-reports', function () {
+    return BandwidthLog::with('user')
+        ->latest()
+        ->limit(100)
+        ->get();
 });
 
 Route::get('/create-queue', function (MikrotikService $mikrotik) {

@@ -13,4 +13,8 @@ class BandwidthLog extends Model
         'allocated_bandwidth',
     ];
 
+    public function user()
+    {
+        return $this->belongsTo(User::class);
+    }
 }
