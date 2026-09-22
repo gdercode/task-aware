@@ -6,8 +6,10 @@ use App\Models\BandwidthLog;
 use App\Models\Flow;
 use App\Models\User;
 use App\Services\AllocationPreviewService;
+use App\Services\AllocationSnapshotService;
 use App\Services\ImportanceEngineService;
 use App\Services\MikrotikService;
+use App\Services\RouterDeviceDetectionService;
 use App\Services\TrafficDetectionService;
 use App\Services\TrafficSyncService;
 use Illuminate\Console\Command;
@@ -24,81 +26,167 @@ class RunBandwidthAllocator extends Command
         AllocationPreviewService $allocationPreview,
         TrafficSyncService $trafficSync,
         TrafficDetectionService $detector,
+        RouterDeviceDetectionService $deviceDetection,
+        AllocationSnapshotService $snapshot,
     ) {
         $this->info('Bandwidth allocator started...');
 
         while (true) {
-            $routerReachable = $mikrotik->isReachable();
+            $this->cycle(
+                $mikrotik,
+                $engine,
+                $allocationPreview,
+                $trafficSync,
+                $detector,
+                $deviceDetection,
+                $snapshot,
+            );
+        }
+    }
 
-            if (! $routerReachable) {
-                $this->warn("MikroTik unreachable at {$mikrotik->connectionLabel()} — skipping until connected");
-                sleep(5);
-                continue;
+    protected function cycle(
+        MikrotikService $mikrotik,
+        ImportanceEngineService $engine,
+        AllocationPreviewService $allocationPreview,
+        TrafficSyncService $trafficSync,
+        TrafficDetectionService $detector,
+        RouterDeviceDetectionService $deviceDetection,
+        AllocationSnapshotService $snapshot,
+    ): void {
+        if (! $mikrotik->isReachable()) {
+            $snapshot->publishOffline();
+            $this->warn("MikroTik unreachable at {$mikrotik->connectionLabel()} — skipping until connected");
+            sleep(5);
+
+            return;
+        }
+
+        $presence = $deviceDetection->presenceSources();
+        $identified = [];
+        foreach ($presence as $source) {
+            foreach ($source['ips'] as $ip) {
+                $identified[$ip] = true;
             }
+        }
+        $this->line('Identified '.count($identified).' device address(es) from ARP, DHCP, and hotspot');
 
-            $onlineIps = $mikrotik->tryGetOnlineDeviceIps() ?? [];
-            $this->line('Devices online on router: '.count($onlineIps));
+        $connections = [];
+        $connectionError = null;
 
+        try {
+            $connections = $mikrotik->getConnections();
+        } catch (\Throwable $e) {
+            $connectionError = $e->getMessage();
+            $this->warn('Connection table unavailable: '.$e->getMessage());
+        }
+
+        $detection = $deviceDetection->diagnose(
+            $connectionError === null ? $connections : null,
+            $presence,
+            $connectionError,
+        );
+        $onlineIps = $detection['online_ips'];
+        $this->line('Devices online on router: '.count($onlineIps));
+
+        if ($connectionError === null) {
             try {
-                $sync = $trafficSync->syncFromRouter($mikrotik, $detector, $onlineIps);
+                $sync = $trafficSync->syncFromRouter($mikrotik, $detector, $onlineIps, $connections);
                 $this->line("Synced {$sync['synced']} connection(s)");
             } catch (\Throwable $e) {
                 $this->warn('Traffic sync failed: '.$e->getMessage());
             }
+        }
 
-            $poolMeasure = $mikrotik->measurePoolKbps();
-            $allocation = $allocationPreview->build($poolMeasure['kbps'], $onlineIps);
-            $poolKbps = $allocation['pool_kbps'];
+        $monitor = $mikrotik->monitorInterfaceName();
+        $interfaceKbps = 0;
+        $interfaceError = null;
 
-            if ($poolKbps <= 0) {
-                $this->warn('Pool is 0 Kbps — set monitor interface on dashboard or generate client traffic');
-                sleep(5);
+        try {
+            $interfaceKbps = $mikrotik->measureInterfaceKbps($monitor);
+        } catch (\Throwable $e) {
+            $interfaceError = $e->getMessage();
+            $mikrotik->resetClient();
+        }
+
+        $poolMeasure = $mikrotik->poolFromMeasurements($interfaceKbps, $interfaceError, $connections);
+        $interfaceTraffic = $mikrotik->interfaceTrafficSnapshot($monitor, $interfaceError ? null : $interfaceKbps);
+        $throughput = $mikrotik->measureUserThroughputKbps($connections);
+        $allocation = $allocationPreview->build($poolMeasure['kbps'], $onlineIps, $throughput);
+        $warning = $snapshot->measurementWarning($poolMeasure, $allocation, $interfaceTraffic, $detection);
+
+        $snapshot->publishLive($detection, $poolMeasure, $interfaceTraffic, $allocation, $warning);
+
+        $poolKbps = $allocation['pool_kbps'];
+        $this->info('Report published: '.$engine->formatKbpsDisplay($poolKbps).' ['.$poolMeasure['source'].']');
+
+        if ($poolKbps <= 0) {
+            $this->warn('Pool is 0 Kbps — set monitor interface on dashboard or generate client traffic');
+            $mikrotik->probeNextInterface($monitor);
+            sleep(5);
+
+            return;
+        }
+
+        $availableBandwidth = $engine->formatLimit($poolKbps);
+        $rowsByUser = $allocation['users']->keyBy(fn ($row) => $row->user->id);
+        $assignments = [];
+        $pendingLogs = [];
+
+        foreach (User::whereNotNull('ip_address')->get() as $user) {
+            $row = $rowsByUser->get($user->id);
+            $shareKbps = $row->share_kbps ?? 0;
+            $isOnline = $row->is_online ?? false;
+            $status = $row->activity_status ?? 'unknown';
+            $limit = (! $isOnline || $shareKbps <= 0) ? '0k/0k' : $engine->formatLimit($shareKbps);
+
+            $assignments[] = [
+                'name' => $user->name,
+                'target' => $user->ip_address,
+                'max_limit' => $limit,
+            ];
+
+            if (! $isOnline || $shareKbps <= 0) {
+                $reason = ! $isOnline ? 'offline' : $status;
+                $this->line("{$user->name} → 0 Kbps ({$reason})");
+
                 continue;
             }
 
-            $availableBandwidth = $engine->formatLimit($poolKbps);
-            $this->info("Pool: {$engine->formatKbpsDisplay($poolKbps)} ({$availableBandwidth}) [{$poolMeasure['source']}]");
-
-            foreach (User::whereNotNull('ip_address')->get() as $user) {
-                $row = $allocation['users']->first(fn ($r) => $r->user->id === $user->id);
-                $shareKbps = $row->share_kbps ?? 0;
-                $isOnline = $row->is_online ?? false;
-                $status = $row->activity_status ?? 'unknown';
-
-                if (! $isOnline || $shareKbps <= 0) {
-                    $mikrotik->updateQueue($user->name, $user->ip_address, '0k/0k');
-                    $reason = ! $isOnline ? 'offline' : $status;
-                    $this->line("{$user->name} → 0 Kbps ({$reason})");
-
-                    continue;
-                }
-
-                $bandwidth = $engine->formatLimit($shareKbps);
-                $updated = $mikrotik->updateQueue($user->name, $user->ip_address, $bandwidth);
-
-                if (! $updated) {
-                    $this->warn("Queue update failed — skipping log for {$user->name}");
-                    continue;
-                }
-
-                $score = $row->score ?? 0;
-                $taskType = $row->task_type
+            $pendingLogs[] = [
+                'name' => $user->name,
+                'user_id' => $user->id,
+                'share_kbps' => $shareKbps,
+                'bandwidth' => $limit,
+                'score' => $row->score ?? 0,
+                'status' => $status,
+                'task_type' => $row->task_type
                     ?? Flow::where('user_id', $user->id)->where('is_active', true)->value('classification')
-                    ?? 'NORMAL';
+                    ?? 'NORMAL',
+            ];
+        }
 
-                BandwidthLog::create([
-                    'user_id' => $user->id,
-                    'task_type' => $taskType,
-                    'importance_score' => $score,
-                    'allocated_bandwidth' => $bandwidth,
-                    'available_bandwidth' => $availableBandwidth,
-                    'router_connected' => true,
-                ]);
+        $results = $mikrotik->syncQueueLimits($assignments);
 
-                $this->info("{$user->name} → {$engine->formatKbpsDisplay($shareKbps)} ({$bandwidth}, score {$score}, {$status})");
+        foreach ($pendingLogs as $log) {
+            if (! ($results[$log['name']] ?? false)) {
+                $this->warn("Queue update failed — skipping log for {$log['name']}");
+
+                continue;
             }
 
-            sleep(5);
+            BandwidthLog::create([
+                'user_id' => $log['user_id'],
+                'task_type' => $log['task_type'],
+                'importance_score' => $log['score'],
+                'allocated_bandwidth' => $log['bandwidth'],
+                'available_bandwidth' => $availableBandwidth,
+                'router_connected' => true,
+            ]);
+
+            $this->info("{$log['name']} → {$engine->formatKbpsDisplay($log['share_kbps'])} ({$log['bandwidth']}, score {$log['score']}, {$log['status']})");
         }
+
+        $mikrotik->probeNextInterface($monitor);
+        sleep(5);
     }
 }

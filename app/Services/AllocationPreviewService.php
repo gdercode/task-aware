@@ -15,6 +15,7 @@ class AllocationPreviewService
 
     /**
      * @param  array<string, true>  $onlineIps
+     * @param  array<int, array{download_kbps: int, upload_kbps: int, total_kbps: int}>|null  $userThroughput
      * @return array{
      *     pool_kbps: int,
      *     measured_pool_kbps: int,
@@ -28,7 +29,7 @@ class AllocationPreviewService
      *     users: Collection
      * }
      */
-    public function build(int $poolKbps, array $onlineIps = []): array
+    public function build(int $poolKbps, array $onlineIps = [], ?array $userThroughput = null): array
     {
         $measuredPoolKbps = max(0, $poolKbps);
         $monitoredUsers = User::whereNotNull('ip_address')->orderBy('name')->get();
@@ -51,7 +52,7 @@ class AllocationPreviewService
 
         $poolUsingFallback = $measuredPoolKbps <= 0 && $poolKbps > 0;
         $distribution = $this->engine->distributePool($allocatableScores, $poolKbps);
-        $userThroughput = $this->mikrotik->measureUserThroughputKbps();
+        $userThroughput ??= $this->mikrotik->measureUserThroughputKbps();
         $rows = $this->buildRows($entries, $distribution, $totalScore, $userThroughput);
         $onlineCount = collect($entries)->where('is_online', true)->count();
         $offlineCount = collect($entries)->where('is_online', false)->count();

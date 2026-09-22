@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\MikrotikSetting;
 use App\Models\User;
+use Illuminate\Support\Facades\Cache;
 use RouterOS\Client;
 use RouterOS\Exceptions\ConnectException;
 use RouterOS\Query;
@@ -44,6 +45,11 @@ class MikrotikService
         $settings = $this->settings();
 
         return sprintf('%s:%d', $settings->host, $settings->port);
+    }
+
+    public function monitorInterfaceName(): string
+    {
+        return $this->settings()->monitor_interface ?: 'ether1';
     }
 
     public function isReachable(): bool
@@ -152,6 +158,74 @@ class MikrotikService
     }
 
     /**
+     * Apply queue limits with one queue-list read for the whole cycle.
+     *
+     * @param  list<array{name: string, target: string, max_limit: string}>  $assignments
+     * @return array<string, bool>
+     */
+    public function syncQueueLimits(array $assignments): array
+    {
+        $results = [];
+
+        if ($assignments === []) {
+            return $results;
+        }
+
+        try {
+            $queues = $this->getClient()->query('/queue/simple/print')->read();
+        } catch (ConnectException $e) {
+            $this->resetClient();
+
+            foreach ($assignments as $row) {
+                $results[$row['name']] = false;
+            }
+
+            return $results;
+        } catch (\Throwable $e) {
+            $this->resetClient();
+
+            throw $e;
+        }
+
+        $idsByName = [];
+
+        foreach ($queues as $queue) {
+            if (isset($queue['name'], $queue['.id'])) {
+                $idsByName[$queue['name']] = $queue['.id'];
+            }
+        }
+
+        $disconnected = false;
+
+        foreach ($assignments as $row) {
+            if ($disconnected) {
+                $results[$row['name']] = false;
+
+                continue;
+            }
+
+            try {
+                if (isset($idsByName[$row['name']])) {
+                    $query = new Query('/queue/simple/set');
+                    $query->equal('.id', $idsByName[$row['name']]);
+                    $query->equal('max-limit', $row['max_limit']);
+                    $this->getClient()->query($query)->read();
+                } else {
+                    $this->createQueue($row['name'], $row['target'], $row['max_limit']);
+                }
+
+                $results[$row['name']] = true;
+            } catch (ConnectException $e) {
+                $this->resetClient();
+                $results[$row['name']] = false;
+                $disconnected = true;
+            }
+        }
+
+        return $results;
+    }
+
+    /**
      * Measure the bandwidth pool using interface monitor + firewall connection rates.
      *
      * @return array{
@@ -163,9 +237,9 @@ class MikrotikService
      *     interface_error: ?string
      * }
      */
-    public function measurePoolKbps(): array
+    public function measurePoolKbps(?array $connections = null): array
     {
-        $interface = $this->settings()->monitor_interface ?: 'ether1';
+        $interface = $this->monitorInterfaceName();
         $interfaceKbps = 0;
         $interfaceError = null;
 
@@ -176,10 +250,30 @@ class MikrotikService
             $this->resetClient();
         }
 
-        $connectionKbps = $this->measureFromConnections();
-        $kbps = max($interfaceKbps, $connectionKbps);
+        return $this->poolFromMeasurements(
+            $interfaceKbps,
+            $interfaceError,
+            $connections ?? $this->safeConnections(),
+        );
+    }
 
+    /**
+     * @param  list<array<string, mixed>>  $connections
+     * @return array{
+     *     kbps: int,
+     *     interface_kbps: int,
+     *     connection_kbps: int,
+     *     source: string,
+     *     interface: string,
+     *     interface_error: ?string
+     * }
+     */
+    public function poolFromMeasurements(int $interfaceKbps, ?string $interfaceError, array $connections): array
+    {
+        $connectionKbps = $this->sumConnectionRatesKbps($connections);
+        $kbps = max($interfaceKbps, $connectionKbps);
         $source = 'none';
+
         if ($kbps > 0) {
             $source = $interfaceKbps >= $connectionKbps ? 'interface' : 'connections';
         }
@@ -189,9 +283,98 @@ class MikrotikService
             'interface_kbps' => $interfaceKbps,
             'connection_kbps' => $connectionKbps,
             'source' => $source,
-            'interface' => $interface,
+            'interface' => $this->monitorInterfaceName(),
             'interface_error' => $interfaceError,
         ];
+    }
+
+    public function measureInterfaceKbps(string $interface): int
+    {
+        return $this->measureFromInterface($interface);
+    }
+
+    /**
+     * Interface names plus the latest known rate. Does not probe every interface.
+     *
+     * @return list<array{name: string, kbps: int|null}>
+     */
+    public function interfaceTrafficSnapshot(string $monitor, ?int $monitorKbps): array
+    {
+        $names = [];
+
+        try {
+            $names = $this->getRunningInterfaceNames();
+        } catch (\Throwable) {
+            $this->resetClient();
+        }
+
+        $cached = Cache::store('file')->get('bandwidth.interface_kbps', []);
+        if (! is_array($cached)) {
+            $cached = [];
+        }
+
+        if ($monitor !== '') {
+            $cached[$monitor] = $monitorKbps;
+        }
+
+        if ($names !== []) {
+            $cached = array_intersect_key($cached, array_flip(array_merge($names, [$monitor])));
+        }
+
+        Cache::store('file')->put('bandwidth.interface_kbps', $cached, now()->addHour());
+
+        $listNames = $names !== [] ? $names : array_keys($cached);
+        $samples = [];
+
+        foreach ($listNames as $name) {
+            $samples[] = [
+                'name' => $name,
+                'kbps' => array_key_exists($name, $cached) ? $cached[$name] : null,
+            ];
+        }
+
+        usort($samples, fn ($a, $b) => ($b['kbps'] ?? -1) <=> ($a['kbps'] ?? -1));
+
+        return array_slice($samples, 0, 10);
+    }
+
+    /**
+     * Measure one non-monitor interface so the picker fills in without blocking the report.
+     */
+    public function probeNextInterface(string $monitor): void
+    {
+        try {
+            $names = $this->getRunningInterfaceNames();
+        } catch (\Throwable) {
+            $this->resetClient();
+
+            return;
+        }
+
+        $others = array_values(array_filter($names, fn ($name) => $name !== $monitor));
+
+        if ($others === []) {
+            return;
+        }
+
+        $index = (int) Cache::store('file')->get('bandwidth.interface_rr', 0);
+        $name = $others[$index % count($others)];
+        Cache::store('file')->put('bandwidth.interface_rr', $index + 1, now()->addHour());
+
+        try {
+            $kbps = $this->measureFromInterface($name);
+        } catch (\Throwable) {
+            $this->resetClient();
+            $kbps = null;
+        }
+
+        $cached = Cache::store('file')->get('bandwidth.interface_kbps', []);
+        if (! is_array($cached)) {
+            $cached = [];
+        }
+
+        $cached[$name] = $kbps;
+        Cache::store('file')->put('bandwidth.interface_kbps', $cached, now()->addHour());
     }
 
     /**
@@ -199,25 +382,16 @@ class MikrotikService
      */
     public function getInterfaceTrafficSamples(): array
     {
+        $monitor = $this->monitorInterfaceName();
+
         try {
-            $samples = [];
-
-            foreach ($this->getRunningInterfaceNames() as $name) {
-                try {
-                    $samples[] = ['name' => $name, 'kbps' => $this->measureFromInterface($name)];
-                } catch (\Throwable) {
-                    $samples[] = ['name' => $name, 'kbps' => null];
-                }
-            }
-
-            usort($samples, fn ($a, $b) => ($b['kbps'] ?? 0) <=> ($a['kbps'] ?? 0));
-
-            return array_slice($samples, 0, 10);
+            $kbps = $this->measureFromInterface($monitor);
         } catch (\Throwable) {
             $this->resetClient();
-
-            return [];
+            $kbps = null;
         }
+
+        return $this->interfaceTrafficSnapshot($monitor, $kbps);
     }
 
     /**
@@ -271,39 +445,52 @@ class MikrotikService
         return $pool['kbps'];
     }
 
-    protected function measureFromConnections(): int
+    /**
+     * @return list<array<string, mixed>>
+     */
+    protected function safeConnections(): array
     {
         try {
-            $totalBps = 0;
-
-            foreach ($this->getConnections() as $conn) {
-                $totalBps += (int) ($conn['orig-rate'] ?? 0);
-                $totalBps += (int) ($conn['repl-rate'] ?? 0);
-            }
-
-            return (int) ceil($totalBps / 1_000);
+            return $this->getConnections();
         } catch (\Throwable) {
             $this->resetClient();
 
-            return 0;
+            return [];
         }
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $connections
+     */
+    protected function sumConnectionRatesKbps(array $connections): int
+    {
+        $totalBps = 0;
+
+        foreach ($connections as $conn) {
+            $totalBps += (int) ($conn['orig-rate'] ?? 0);
+            $totalBps += (int) ($conn['repl-rate'] ?? 0);
+        }
+
+        return (int) ceil($totalBps / 1_000);
     }
 
     /**
      * Live per-user throughput from firewall connection rates (bits/sec → Kbps).
      *
+     * @param  list<array<string, mixed>>|null  $connections
      * @return array<int, array{download_kbps: int, upload_kbps: int, total_kbps: int}>
      */
-    public function measureUserThroughputKbps(): array
+    public function measureUserThroughputKbps(?array $connections = null): array
     {
         try {
+            $connections ??= $this->safeConnections();
             $usersByIp = User::whereNotNull('ip_address')
                 ->get()
                 ->keyBy(fn (User $user) => $this->normalizeIp($user->ip_address));
 
             $bps = [];
 
-            foreach ($this->getConnections() as $conn) {
+            foreach ($connections as $conn) {
                 $src = $conn['src-address'] ?? null;
 
                 if (! $src) {

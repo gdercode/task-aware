@@ -16,17 +16,20 @@ class TrafficSyncService
      * Sync router connections, refresh task classifications, and update user activity.
      *
      * @param  array<string, true>  $onlineIps
+     * @param  list<array<string, mixed>>|null  $connections
      * @return array{synced: int, user_bytes: array<int, int>}
      */
     public function syncFromRouter(
         MikrotikService $mikrotik,
         TrafficDetectionService $detector,
         array $onlineIps = [],
+        ?array $connections = null,
     ): array {
-        $connections = $mikrotik->getConnections();
+        $connections ??= $mikrotik->getConnections();
         $usersByIp = User::whereNotNull('ip_address')
             ->get()
             ->keyBy(fn (User $user) => $mikrotik->normalizeIp($user->ip_address));
+        $flowIndex = $this->activeFlowsByDestination($usersByIp->pluck('id')->all());
         $userBytes = [];
         $seenUserIds = [];
         $synced = 0;
@@ -52,10 +55,8 @@ class TrafficSyncService
             $userBytes[$user->id] = ($userBytes[$user->id] ?? 0) + $bytes;
             $seenUserIds[$user->id] = true;
 
-            $flow = Flow::where('user_id', $user->id)
-                ->where('is_active', true)
-                ->where('destination', $dst)
-                ->first();
+            $flowKey = $user->id.'|'.$dst;
+            $flow = $flowIndex[$flowKey] ?? null;
 
             $score = $this->engine->calculate(
                 $user->role,
@@ -72,7 +73,7 @@ class TrafficSyncService
                     'importance_score' => $score,
                 ]);
             } else {
-                Flow::create([
+                $flowIndex[$flowKey] = Flow::create([
                     'user_id' => $user->id,
                     'task_type' => $classification,
                     'priority' => 1,
@@ -101,5 +102,24 @@ class TrafficSyncService
             'synced' => $synced,
             'user_bytes' => $userBytes,
         ];
+    }
+
+    /**
+     * @param  list<int>  $userIds
+     * @return array<string, Flow>
+     */
+    protected function activeFlowsByDestination(array $userIds): array
+    {
+        if ($userIds === []) {
+            return [];
+        }
+
+        $index = [];
+
+        foreach (Flow::whereIn('user_id', $userIds)->where('is_active', true)->get() as $flow) {
+            $index[$flow->user_id.'|'.$flow->destination] = $flow;
+        }
+
+        return $index;
     }
 }

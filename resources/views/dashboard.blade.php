@@ -15,18 +15,26 @@
                 <h1 class="text-xl sm:text-2xl font-semibold text-white">Allocation Dashboard</h1>
             </div>
             <div class="flex items-center gap-3 text-sm text-slate-400">
-                @if ($mikrotikConnected)
+                @if ($reportState === 'live')
                     <span class="inline-flex items-center gap-1.5">
                         <span class="relative flex h-2 w-2">
                             <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                             <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
                         </span>
-                        Live — MikroTik connected
+                        Live report
+                        @if ($reportUpdatedAt)
+                            <span class="text-slate-500">· {{ $reportUpdatedAt->diffForHumans() }}</span>
+                        @endif
+                    </span>
+                @elseif ($reportState === 'offline')
+                    <span class="inline-flex items-center gap-1.5 text-amber-400">
+                        <span class="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                        Router offline
                     </span>
                 @else
                     <span class="inline-flex items-center gap-1.5 text-amber-400">
                         <span class="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
-                        No live data — router offline
+                        Waiting for allocator
                     </span>
                 @endif
                 <button onclick="location.reload()" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-medium transition-colors">
@@ -49,12 +57,17 @@
             @include('partials.detection-diagnostics', ['detection' => $detection])
         @endif
 
-        @unless ($mikrotikConnected)
+        @if ($reportState === 'waiting')
             <div class="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-                <strong>No live allocations.</strong> The dashboard only shows users and bandwidth when MikroTik is connected.
-                Allocations come from the router via <code class="text-amber-100">php artisan bandwidth:run</code> — not from old database records.
+                <strong>Report not ready.</strong> This page reads the latest snapshot and does not query MikroTik.
+                Start <code class="text-amber-100">php artisan bandwidth:run</code> so devices are identified and the report is published.
             </div>
-        @endunless
+        @elseif ($reportState === 'offline')
+            <div class="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+                <strong>No live allocations.</strong> MikroTik is unreachable, so the allocator has not published a report.
+                Allocations come from <code class="text-amber-100">php artisan bandwidth:run</code>.
+            </div>
+        @endif
 
         @if ($mikrotikConnected && !empty($bandwidthMeasureError))
             <div class="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">

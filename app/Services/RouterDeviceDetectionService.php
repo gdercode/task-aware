@@ -11,19 +11,45 @@ class RouterDeviceDetectionService
     ) {}
 
     /**
+     * ARP, DHCP, and hotspot only. The firewall connection table is not read here.
+     *
+     * @return array<string, array{count: int, error: ?string, ips: list<string>}>
+     */
+    public function presenceSources(): array
+    {
+        return [
+            'arp' => $this->collectArp(),
+            'dhcp' => $this->collectDhcp(),
+            'hotspot' => $this->collectHotspot(),
+        ];
+    }
+
+    /**
+     * @param  list<array<string, mixed>>|null  $connections
+     * @param  array<string, array{count: int, error: ?string, ips: list<string>}>|null  $presence
      * @return array{
      *     online_ips: array<string, true>,
      *     sources: array<string, array{count: int, error: ?string, ips: list<string>}>,
      *     users: list<array<string, mixed>>
      * }
      */
-    public function diagnose(): array
+    public function diagnose(?array $connections = null, ?array $presence = null, ?string $connectionError = null): array
     {
+        $presence ??= $this->presenceSources();
+
+        if ($connectionError !== null) {
+            $connectionSource = ['count' => 0, 'error' => $connectionError, 'ips' => []];
+        } elseif ($connections === null) {
+            $connectionSource = $this->collectConnections();
+        } else {
+            $connectionSource = $this->ipsFromConnectionRows($connections);
+        }
+
         $sources = [
-            'arp' => $this->collectArp(),
-            'connections' => $this->collectConnections(),
-            'dhcp' => $this->collectDhcp(),
-            'hotspot' => $this->collectHotspot(),
+            'arp' => $presence['arp'],
+            'connections' => $connectionSource,
+            'dhcp' => $presence['dhcp'],
+            'hotspot' => $presence['hotspot'],
         ];
 
         $onlineIps = [];
@@ -84,26 +110,35 @@ class RouterDeviceDetectionService
     protected function collectConnections(): array
     {
         try {
-            $ips = [];
-
-            foreach ($this->mikrotik->getConnections() as $conn) {
-                foreach (['src-address', 'dst-address'] as $field) {
-                    if ($addr = $conn[$field] ?? null) {
-                        $ip = $this->mikrotik->normalizeIp(explode(':', $addr)[0]);
-                        if ($ip !== '' && $this->isPrivateOrLocalClientIp($ip)) {
-                            $ips[$ip] = true;
-                        }
-                    }
-                }
-            }
-
-            $list = array_keys($ips);
-            sort($list);
-
-            return ['count' => count($list), 'error' => null, 'ips' => $list];
+            return $this->ipsFromConnectionRows($this->mikrotik->getConnections());
         } catch (\Throwable $e) {
             return ['count' => 0, 'error' => $e->getMessage(), 'ips' => []];
         }
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $connections
+     * @return array{count: int, error: ?string, ips: list<string>}
+     */
+    protected function ipsFromConnectionRows(array $connections): array
+    {
+        $ips = [];
+
+        foreach ($connections as $conn) {
+            foreach (['src-address', 'dst-address'] as $field) {
+                if ($addr = $conn[$field] ?? null) {
+                    $ip = $this->mikrotik->normalizeIp(explode(':', $addr)[0]);
+                    if ($ip !== '' && $this->isPrivateOrLocalClientIp($ip)) {
+                        $ips[$ip] = true;
+                    }
+                }
+            }
+        }
+
+        $list = array_keys($ips);
+        sort($list);
+
+        return ['count' => count($list), 'error' => null, 'ips' => $list];
     }
 
     /**
