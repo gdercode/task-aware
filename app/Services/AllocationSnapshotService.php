@@ -12,6 +12,10 @@ use Illuminate\Support\Facades\Cache;
 
 class AllocationSnapshotService
 {
+    public function __construct(
+        protected AllocationPreviewService $preview,
+    ) {}
+
     private const KEY = 'bandwidth.live_snapshot';
 
     private const FRESH_SECONDS = 180;
@@ -46,6 +50,12 @@ class AllocationSnapshotService
                 'throughput_up_kbps' => $row->throughput_up_kbps,
                 'throughput_total_kbps' => $row->throughput_total_kbps,
                 'throughput_display' => $row->throughput_display,
+                'usage_percent' => $row->usage_percent ?? 0,
+                'impact' => $row->impact ?? 'none',
+                'impact_label' => $row->impact_label ?? 'No allocation',
+                'impact_detail' => $row->impact_detail ?? '',
+                'task_label' => $row->task_label ?? 'General use',
+                'task_effect' => $row->task_effect ?? '',
             ];
         })->values()->all();
 
@@ -136,6 +146,10 @@ class AllocationSnapshotService
             'pool_kbps' => $allocation['pool_kbps'] ?? 0,
             'total_throughput_kbps' => $allocation['total_throughput_kbps'] ?? 0,
             'total_allocated_kbps' => $allocation['total_allocated_kbps'] ?? 0,
+            'usage_of_pool_percent' => $allocation['usage_of_pool_percent'] ?? 0,
+            'usage_of_allocated_percent' => $allocation['usage_of_allocated_percent'] ?? 0,
+            'users_at_limit' => $allocation['users_at_limit'] ?? 0,
+            'headroom_kbps' => $allocation['headroom_kbps'] ?? 0,
             'active_flows' => Flow::where('is_active', true)->count(),
             'total_reports' => BandwidthLog::where('router_connected', true)->count(),
             'total_available_bandwidth' => $connected ? ($allocation['pool_display'] ?? null) : null,
@@ -258,6 +272,10 @@ class AllocationSnapshotService
             'total_score' => 0,
             'total_throughput_kbps' => 0,
             'total_allocated_kbps' => 0,
+            'usage_of_pool_percent' => 0,
+            'usage_of_allocated_percent' => 0,
+            'users_at_limit' => 0,
+            'headroom_kbps' => 0,
             'online_count' => 0,
             'offline_count' => 0,
             'activity' => [],
@@ -277,13 +295,25 @@ class AllocationSnapshotService
             }
 
             $row['user'] = $user;
+            $impact = $this->preview->describeUsage(
+                (int) ($row['throughput_total_kbps'] ?? 0),
+                (int) ($row['share_kbps'] ?? 0),
+                (string) ($row['activity_status'] ?? 'unknown'),
+                $row['task_type'] ?? null,
+            );
 
-            return (object) $row;
+            return (object) array_merge($row, $impact);
         })->filter()->values();
 
         $allocation['users'] = $rows;
+        $summary = $this->preview->summarizeUsage(
+            $rows,
+            (int) ($allocation['pool_kbps'] ?? 0),
+            (int) ($allocation['total_throughput_kbps'] ?? 0),
+            (int) ($allocation['total_allocated_kbps'] ?? 0),
+        );
 
-        return array_merge($empty, $allocation);
+        return array_merge($empty, $allocation, $summary);
     }
 
     /**
@@ -330,6 +360,12 @@ class AllocationSnapshotService
                 'throughput_down_kbps' => $row?->throughput_down_kbps ?? 0,
                 'throughput_up_kbps' => $row?->throughput_up_kbps ?? 0,
                 'throughput_display' => $row?->throughput_display ?? '0 Kbps',
+                'usage_percent' => $row?->usage_percent ?? 0,
+                'impact' => $row?->impact ?? 'none',
+                'impact_label' => $row?->impact_label ?? 'No allocation',
+                'impact_detail' => $row?->impact_detail ?? '',
+                'task_label' => $row?->task_label ?? null,
+                'task_effect' => $row?->task_effect ?? null,
                 'offline_reason' => match ($status) {
                     'offline' => 'Device offline',
                     'idle' => 'Idle — no internet use',

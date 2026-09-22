@@ -33,8 +33,7 @@
                             <th class="px-5 py-3 font-medium text-right">↑ Up</th>
                             <th class="px-5 py-3 font-medium text-right">Live</th>
                             <th class="px-5 py-3 font-medium text-right">Allocated</th>
-                            <th class="px-5 py-3 font-medium text-right">Share</th>
-                            <th class="px-5 py-3 font-medium text-right">Queue</th>
+                            <th class="px-5 py-3 font-medium">Impact</th>
                         @else
                             <th class="px-5 py-3 font-medium text-right">Throughput</th>
                         @endif
@@ -79,12 +78,15 @@
                                 <td class="px-5 py-3 text-right">
                                     <span class="font-mono font-semibold text-emerald-400">{{ number_format($row->share_kbps ?? 0) }}</span>
                                     <span class="text-xs text-slate-500"> Kbps</span>
+                                    @if (($row->share_percent ?? 0) > 0)
+                                        <span class="block text-xs text-slate-500">{{ $row->share_percent }}% of pool</span>
+                                    @endif
                                 </td>
-                                <td class="px-5 py-3 text-right text-slate-400">
-                                    {{ isset($row->share_percent) ? $row->share_percent.'%' : '—' }}
-                                </td>
-                                <td class="px-5 py-3 text-right font-mono text-slate-400 text-xs">
-                                    {{ $row->bandwidth ?? '0k/0k' }}
+                                <td class="px-5 py-3">
+                                    <span class="text-xs text-slate-300">{{ $row->impact_label ?? '—' }}</span>
+                                    @if (($row->share_kbps ?? 0) > 0)
+                                        <span class="block text-xs font-mono text-slate-500">{{ $row->usage_percent ?? 0 }}% of allocation</span>
+                                    @endif
                                 </td>
                             @else
                                 <td class="px-5 py-3 text-right font-mono text-slate-500 text-xs">

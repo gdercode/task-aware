@@ -3,7 +3,7 @@
 @section('title', 'AL Reports Dashboard')
 
 @push('head')
-    <meta http-equiv="refresh" content="30">
+    <meta http-equiv="refresh" content="5">
 @endpush
 
 @section('content')
@@ -116,26 +116,33 @@
                 @endif
             </div>
             <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
-                <p class="text-sm text-slate-400">Live Throughput</p>
+                <p class="text-sm text-slate-400">Data in use</p>
                 <p class="mt-1 text-3xl font-semibold text-sky-400">{{ number_format($stats['total_throughput_kbps'] ?? 0) }}</p>
-                <p class="text-xs text-slate-500 mt-1">Kbps on user connections now</p>
+                <p class="text-xs text-slate-500 mt-1">Kbps moving on user connections</p>
             </div>
             <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
-                <p class="text-sm text-slate-400">Total Bandwidth Available</p>
+                <p class="text-sm text-slate-400">Allocated</p>
                 @if ($mikrotikConnected && $stats['total_available_bandwidth'] !== null)
-                    <p class="mt-1 text-3xl font-semibold text-emerald-400">{{ $stats['total_available_bandwidth'] }}</p>
-                    <p class="text-xs text-slate-500 mt-1 font-mono">{{ number_format($stats['pool_kbps'] ?? 0) }} Kbps measured</p>
+                    <p class="mt-1 text-3xl font-semibold text-emerald-400">{{ number_format($stats['total_allocated_kbps'] ?? 0) }}</p>
+                    <p class="text-xs text-slate-500 mt-1 font-mono">Kbps shared from {{ $stats['total_available_bandwidth'] }}</p>
                     @if ($stats['total_available_at'])
                         <p class="text-xs text-slate-500">{{ $stats['total_available_at']->format('M j, H:i:s') }}</p>
                     @endif
                 @else
                     <p class="mt-1 text-3xl font-semibold text-slate-500">—</p>
-                    <p class="text-xs text-slate-500 mt-1">Connect MikroTik to measure live traffic</p>
+                    <p class="text-xs text-slate-500 mt-1">Waiting for a live pool measurement</p>
                 @endif
             </div>
             <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
-                <p class="text-sm text-slate-400">Total AL Reports</p>
-                <p class="mt-1 text-3xl font-semibold text-white">{{ number_format($stats['total_reports']) }}</p>
+                <p class="text-sm text-slate-400">Allocation in use</p>
+                <p class="mt-1 text-3xl font-semibold {{ ($stats['users_at_limit'] ?? 0) > 0 ? 'text-amber-400' : 'text-white' }}">{{ number_format($stats['usage_of_allocated_percent'] ?? 0) }}%</p>
+                <p class="text-xs text-slate-500 mt-1">
+                    @if (($stats['users_at_limit'] ?? 0) > 0)
+                        {{ $stats['users_at_limit'] }} user{{ ($stats['users_at_limit'] ?? 0) === 1 ? '' : 's' }} at the queue limit
+                    @else
+                        Live use compared with allocated queues
+                    @endif
+                </p>
             </div>
         </div>
 
