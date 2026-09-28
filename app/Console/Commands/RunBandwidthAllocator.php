@@ -155,6 +155,7 @@ class RunBandwidthAllocator extends Command
                 'name' => $user->name,
                 'target' => $user->ip_address,
                 'max_limit' => $limit,
+                'blocked' => $rolePercentage <= 0,
             ];
 
             if ($rolePercentage <= 0) {
@@ -184,12 +185,9 @@ class RunBandwidthAllocator extends Command
         }
 
         if ($poolKbps <= 0) {
-            $blockedOnly = array_values(array_filter(
-                $assignments,
-                fn (array $row) => $row['max_limit'] === $engine->blockedLimit(),
-            ));
-            if ($blockedOnly !== []) {
-                $mikrotik->syncQueueLimits($blockedOnly);
+            $enforcement = $mikrotik->applyAccessControl($assignments, $connections, false);
+            if ($enforcement['error']) {
+                $this->warn('Router did not block 0% devices: '.$enforcement['error']);
             }
             $this->warn('Pool is 0 Kbps — set monitor interface on dashboard or generate client traffic');
             $mikrotik->probeNextInterface($monitor);
@@ -198,7 +196,11 @@ class RunBandwidthAllocator extends Command
             return;
         }
 
-        $results = $mikrotik->syncQueueLimits($assignments);
+        $enforcement = $mikrotik->applyAccessControl($assignments, $connections, true);
+        if ($enforcement['error']) {
+            $this->warn('Router did not apply bandwidth control: '.$enforcement['error']);
+        }
+        $results = $enforcement['queues'];
 
         foreach ($pendingLogs as $log) {
             if (! ($results[$log['name']] ?? false)) {

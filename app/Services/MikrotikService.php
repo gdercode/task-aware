@@ -208,7 +208,9 @@ class MikrotikService
                 if (isset($idsByName[$row['name']])) {
                     $query = new Query('/queue/simple/set');
                     $query->equal('.id', $idsByName[$row['name']]);
+                    $query->equal('target', $row['target']);
                     $query->equal('max-limit', $row['max_limit']);
+                    $query->equal('disabled', 'no');
                     $this->getClient()->query($query)->read();
                 } else {
                     $this->createQueue($row['name'], $row['target'], $row['max_limit']);
@@ -223,6 +225,238 @@ class MikrotikService
         }
 
         return $results;
+    }
+
+    /**
+     * Queues alone do not stop browsing: MikroTik treats 0/0 as unlimited, and FastTrack
+     * bypasses simple queues. A 0% device is dropped in the forward chain and its open
+     * connections are removed so the block takes effect immediately.
+     *
+     * @param  list<array{name: string, target: string, max_limit: string, blocked?: bool}>  $assignments
+     * @param  list<array<string, mixed>>  $connections
+     * @return array{queues: array<string, bool>, error: ?string}
+     */
+    public function applyAccessControl(array $assignments, array $connections, bool $updateAllQueues = true): array
+    {
+        $blockedIps = [];
+        $controlledIps = [];
+
+        foreach ($assignments as $index => $row) {
+            $ip = $this->hostFromTarget($row['target'] ?? null);
+            if ($ip === '') {
+                continue;
+            }
+
+            $assignments[$index]['target'] = $ip.'/32';
+            $controlledIps[$ip] = true;
+            if (! empty($row['blocked'])) {
+                $blockedIps[$ip] = true;
+            }
+        }
+
+        try {
+            $this->syncAddressList('ta-blocked', array_keys($blockedIps));
+            $this->syncAddressList('ta-controlled', array_keys($controlledIps));
+            $this->ensureBlockRules();
+            $this->ensureFasttrackBypass();
+            $this->removeConnectionsFor($blockedIps, $connections);
+        } catch (\Throwable $e) {
+            $this->resetClient();
+
+            return [
+                'queues' => [],
+                'error' => $e->getMessage(),
+            ];
+        }
+
+        $queueRows = $updateAllQueues
+            ? $assignments
+            : array_values(array_filter($assignments, fn (array $row) => ! empty($row['blocked'])));
+
+        return [
+            'queues' => $this->syncQueueLimits($queueRows),
+            'error' => null,
+        ];
+    }
+
+    /**
+     * @param  list<string>  $ips
+     */
+    protected function syncAddressList(string $list, array $ips): void
+    {
+        $wanted = [];
+        foreach ($ips as $ip) {
+            $ip = $this->hostFromTarget($ip);
+            if ($ip !== '') {
+                $wanted[$ip] = true;
+            }
+        }
+
+        $rows = $this->getClient()->query('/ip/firewall/address-list/print')->read();
+        $present = [];
+
+        foreach ($rows as $row) {
+            if (($row['list'] ?? '') !== $list) {
+                continue;
+            }
+
+            $address = $this->hostFromTarget($row['address'] ?? null);
+            $ours = ($row['comment'] ?? '') === 'task-aware';
+
+            if ($ours && $address !== '' && ! isset($wanted[$address]) && isset($row['.id'])) {
+                $this->removeById('/ip/firewall/address-list/remove', $row['.id']);
+
+                continue;
+            }
+
+            if ($address !== '') {
+                $present[$address] = true;
+            }
+        }
+
+        foreach (array_keys($wanted) as $ip) {
+            if (isset($present[$ip])) {
+                continue;
+            }
+
+            $query = new Query('/ip/firewall/address-list/add');
+            $query->equal('list', $list);
+            $query->equal('address', $ip);
+            $query->equal('comment', 'task-aware');
+            $this->getClient()->query($query)->read();
+        }
+    }
+
+    protected function ensureBlockRules(): void
+    {
+        $rules = $this->getClient()->query('/ip/firewall/filter/print')->read();
+        $comments = [];
+        foreach ($rules as $rule) {
+            if (isset($rule['comment'])) {
+                $comments[$rule['comment']] = true;
+            }
+        }
+
+        $firstId = $rules[0]['.id'] ?? null;
+        $this->ensureForwardDrop($comments, 'task-aware-block-src', 'src-address-list', $firstId);
+        $this->ensureForwardDrop($comments, 'task-aware-block-dst', 'dst-address-list', $firstId);
+    }
+
+    /**
+     * @param  array<string, true>  $comments
+     */
+    protected function ensureForwardDrop(array $comments, string $comment, string $listProperty, ?string $placeBefore): void
+    {
+        if (isset($comments[$comment])) {
+            return;
+        }
+
+        $query = new Query('/ip/firewall/filter/add');
+        $query->equal('chain', 'forward');
+        $query->equal('action', 'drop');
+        $query->equal($listProperty, 'ta-blocked');
+        $query->equal('comment', $comment);
+        if ($placeBefore) {
+            $query->equal('place-before', $placeBefore);
+        }
+
+        $this->getClient()->query($query)->read();
+    }
+
+    protected function ensureFasttrackBypass(): void
+    {
+        $mangle = $this->getClient()->query('/ip/firewall/mangle/print')->read();
+        $marked = false;
+        foreach ($mangle as $rule) {
+            if (($rule['comment'] ?? '') === 'task-aware-mark') {
+                $marked = true;
+                break;
+            }
+        }
+
+        if (! $marked) {
+            $query = new Query('/ip/firewall/mangle/add');
+            $query->equal('chain', 'prerouting');
+            $query->equal('action', 'mark-connection');
+            $query->equal('new-connection-mark', 'ta-client');
+            $query->equal('passthrough', 'yes');
+            $query->equal('src-address-list', 'ta-controlled');
+            $query->equal('connection-mark', 'no-mark');
+            $query->equal('comment', 'task-aware-mark');
+            $this->getClient()->query($query)->read();
+        }
+
+        $filters = $this->getClient()->query('/ip/firewall/filter/print')->read();
+        foreach ($filters as $rule) {
+            if (($rule['action'] ?? '') !== 'fasttrack-connection' || ($rule['disabled'] ?? 'false') === 'true') {
+                continue;
+            }
+
+            if (($rule['connection-mark'] ?? '') !== '' || ! isset($rule['.id'])) {
+                continue;
+            }
+
+            $query = new Query('/ip/firewall/filter/set');
+            $query->equal('.id', $rule['.id']);
+            $query->equal('connection-mark', 'no-mark');
+            $this->getClient()->query($query)->read();
+        }
+    }
+
+    /**
+     * @param  array<string, true>  $blockedIps
+     * @param  list<array<string, mixed>>  $connections
+     */
+    protected function removeConnectionsFor(array $blockedIps, array $connections): void
+    {
+        if ($blockedIps === []) {
+            return;
+        }
+
+        if ($connections === []) {
+            $connections = $this->getConnections();
+        }
+
+        foreach ($connections as $conn) {
+            $id = $conn['.id'] ?? null;
+            if (! is_string($id) || $id === '') {
+                continue;
+            }
+
+            $src = $this->connectionHost($conn['src-address'] ?? null);
+            $dst = $this->connectionHost($conn['dst-address'] ?? null);
+            if (! isset($blockedIps[$src]) && ! isset($blockedIps[$dst])) {
+                continue;
+            }
+
+            try {
+                $this->removeById('/ip/firewall/connection/remove', $id);
+            } catch (\Throwable) {
+                // The connection may already have closed.
+            }
+        }
+    }
+
+    protected function removeById(string $path, string $id): void
+    {
+        $query = new Query($path);
+        $query->equal('.id', $id);
+        $this->getClient()->query($query)->read();
+    }
+
+    protected function hostFromTarget(?string $target): string
+    {
+        $target = trim((string) $target);
+        if (preg_match('/^(\d{1,3}(?:\.\d{1,3}){3})/', $target, $matches)) {
+            return $matches[1];
+        }
+
+        return '';
+    }
+
+    protected function connectionHost(?string $address): string
+    {
+        return $this->hostFromTarget($address);
     }
 
     /**
