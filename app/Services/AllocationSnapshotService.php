@@ -369,6 +369,7 @@ class AllocationSnapshotService
                 'task_label' => $row?->task_label ?? null,
                 'task_effect' => $row?->task_effect ?? null,
                 'offline_reason' => match (true) {
+                    (int) ($row?->role_percentage ?? -1) === 0 => 'Blocked — 0% weight',
                     (bool) ($row?->is_online ?? false) && ! (bool) ($row?->using_bandwidth ?? false) => 'Not using bandwidth now',
                     $status === 'offline' => 'Device offline',
                     $status === 'idle' => 'Idle — no internet use',

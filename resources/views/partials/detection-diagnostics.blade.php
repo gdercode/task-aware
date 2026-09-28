@@ -66,7 +66,9 @@
                                 {{ isset($device['role_percentage']) ? $device['role_percentage'].'%' : '—' }}
                             </td>
                             <td class="px-5 py-3 text-right font-mono text-emerald-300">
-                                @if (($device['using_bandwidth'] ?? false) && ($device['share_percent'] ?? 0) > 0)
+                                @if (($device['role_percentage'] ?? null) === 0)
+                                    <span class="text-red-300">Blocked</span>
+                                @elseif (($device['using_bandwidth'] ?? false) && ($device['share_percent'] ?? 0) > 0)
                                     {{ $device['share_percent'] }}%
                                 @else
                                     —

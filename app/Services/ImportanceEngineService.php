@@ -101,6 +101,27 @@ class ImportanceEngineService
     }
 
     /**
+     * RouterOS treats max-limit 0/0 as unlimited. 1/1 is the smallest rate and stops browsing.
+     */
+    public function blockedLimit(): string
+    {
+        return '1/1';
+    }
+
+    public function queueLimitFor(int $rolePercentage, int $shareKbps): string
+    {
+        if ($rolePercentage <= 0) {
+            return $this->blockedLimit();
+        }
+
+        if ($shareKbps <= 0) {
+            return '0k/0k';
+        }
+
+        return $this->formatLimit($shareKbps);
+    }
+
+    /**
      * Split the measured pool across users by score. Total allocated always equals poolKbps.
      *
      * @param  array<int|string, int>  $scores

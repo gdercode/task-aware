@@ -229,12 +229,21 @@ class AllocationPreviewService
                 'total_kbps' => 0,
             ];
 
-            $impact = $this->describeUsage(
-                $tp['total_kbps'],
-                $shareKbps,
-                $entry['activity_status'],
-                $entry['task_type'],
-            );
+            $impact = ($entry['role_percentage'] ?? 0) <= 0
+                ? [
+                    'usage_percent' => 0,
+                    'impact' => 'blocked',
+                    'impact_label' => 'Blocked',
+                    'impact_detail' => 'This role weight is 0%, so the router blocks this device from browsing.',
+                    'task_label' => $this->taskCopy($entry['task_type'])['label'],
+                    'task_effect' => 'No share. The queue is held at the minimum rate so traffic cannot pass.',
+                ]
+                : $this->describeUsage(
+                    $tp['total_kbps'],
+                    $shareKbps,
+                    $entry['activity_status'],
+                    $entry['task_type'],
+                );
 
             $rows->push((object) array_merge($impact, [
                 'user' => $entry['user'],
@@ -249,7 +258,7 @@ class AllocationPreviewService
                 'share_percent' => $sharePercent,
                 'share_kbps' => $shareKbps,
                 'kbps_display' => $this->engine->formatKbpsDisplay($shareKbps),
-                'bandwidth' => $shareKbps > 0 ? $this->engine->formatLimit($shareKbps) : '0k/0k',
+                'bandwidth' => $this->engine->queueLimitFor((int) $entry['role_percentage'], $shareKbps),
                 'throughput_down_kbps' => $tp['download_kbps'],
                 'throughput_up_kbps' => $tp['upload_kbps'],
                 'throughput_total_kbps' => $tp['total_kbps'],

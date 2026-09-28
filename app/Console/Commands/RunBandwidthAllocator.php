@@ -138,31 +138,30 @@ class RunBandwidthAllocator extends Command
         $poolKbps = $allocation['pool_kbps'];
         $this->info('Report published: '.$engine->formatKbpsDisplay($poolKbps).' ['.$poolMeasure['source'].']');
 
-        if ($poolKbps <= 0) {
-            $this->warn('Pool is 0 Kbps — set monitor interface on dashboard or generate client traffic');
-            $mikrotik->probeNextInterface($monitor);
-            sleep(5);
-
-            return;
-        }
-
-        $availableBandwidth = $engine->formatLimit($poolKbps);
+        $availableBandwidth = $poolKbps > 0 ? $engine->formatLimit($poolKbps) : '0k/0k';
         $rowsByUser = $allocation['users']->keyBy(fn ($row) => $row->user->id);
         $assignments = [];
         $pendingLogs = [];
 
         foreach (User::whereNotNull('ip_address')->get() as $user) {
             $row = $rowsByUser->get($user->id);
-            $shareKbps = $row->share_kbps ?? 0;
-            $isOnline = $row->is_online ?? false;
-            $status = $row->activity_status ?? 'unknown';
-            $limit = (! $isOnline || $shareKbps <= 0) ? '0k/0k' : $engine->formatLimit($shareKbps);
+            $shareKbps = (int) ($row?->share_kbps ?? 0);
+            $isOnline = (bool) ($row?->is_online ?? false);
+            $status = $row?->activity_status ?? 'unknown';
+            $rolePercentage = (int) ($row?->role_percentage ?? $engine->roleScore((string) $user->role));
+            $limit = $engine->queueLimitFor($rolePercentage, $shareKbps);
 
             $assignments[] = [
                 'name' => $user->name,
                 'target' => $user->ip_address,
                 'max_limit' => $limit,
             ];
+
+            if ($rolePercentage <= 0) {
+                $this->line("{$user->name} → blocked (0% weight)");
+
+                continue;
+            }
 
             if (! $isOnline || $shareKbps <= 0) {
                 $reason = ! $isOnline ? 'offline' : $status;
@@ -182,6 +181,21 @@ class RunBandwidthAllocator extends Command
                     ?? Flow::where('user_id', $user->id)->where('is_active', true)->value('classification')
                     ?? 'NORMAL',
             ];
+        }
+
+        if ($poolKbps <= 0) {
+            $blockedOnly = array_values(array_filter(
+                $assignments,
+                fn (array $row) => $row['max_limit'] === $engine->blockedLimit(),
+            ));
+            if ($blockedOnly !== []) {
+                $mikrotik->syncQueueLimits($blockedOnly);
+            }
+            $this->warn('Pool is 0 Kbps — set monitor interface on dashboard or generate client traffic');
+            $mikrotik->probeNextInterface($monitor);
+            sleep(5);
+
+            return;
         }
 
         $results = $mikrotik->syncQueueLimits($assignments);
