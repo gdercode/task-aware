@@ -12,7 +12,7 @@ class RoleController extends Controller
 {
     public function index(): View
     {
-        $roles = Role::query()->withCount('users')->orderByDesc('weight')->orderBy('name')->get();
+        $roles = Role::query()->withCount('users')->orderByDesc('percentage')->orderBy('name')->get();
 
         return view('roles.index', compact('roles'));
     }
@@ -29,17 +29,20 @@ class RoleController extends Controller
         $role = Role::create([
             'slug' => Role::slugFromName($validated['name']),
             'name' => $validated['name'],
-            'weight' => $validated['weight'],
+            'weight' => $validated['percentage'],
+            'percentage' => $validated['percentage'],
             'is_default' => $request->boolean('is_default'),
         ]);
 
-        $this->keepSingleDefault($role);
-
+        Role::syncPercentages($role, $validated['percentage']);
+        $this->keepSingleDefault($role->fresh());
         Role::flushCache();
+
+        $role->refresh();
 
         return redirect()
             ->route('roles.index')
-            ->with('success', $role->name.' added with value '.$role->weight.'.');
+            ->with('success', $role->name.' saved. Each role percentage was recalculated and now adds up to 100%.');
     }
 
     public function edit(Role $role): View
@@ -53,17 +56,18 @@ class RoleController extends Controller
 
         $role->update([
             'name' => $validated['name'],
-            'weight' => $validated['weight'],
             'is_default' => $request->boolean('is_default'),
         ]);
 
+        Role::syncPercentages($role->fresh(), $validated['percentage']);
         $this->keepSingleDefault($role->fresh());
-
         Role::flushCache();
+
+        $role->refresh();
 
         return redirect()
             ->route('roles.index')
-            ->with('success', $role->name.' updated. New allocations use value '.$role->weight.'.');
+            ->with('success', $role->name.' is '.$role->percentage.'%. The other roles were recalculated so the total stays 100%.');
     }
 
     public function destroy(Role $role): RedirectResponse
@@ -84,8 +88,10 @@ class RoleController extends Controller
         $name = $role->name;
         $role->delete();
 
+        Role::syncPercentages();
+
         if ($wasDefault) {
-            $replacement = Role::query()->orderBy('weight')->first();
+            $replacement = Role::query()->orderBy('percentage')->first();
             $replacement?->update(['is_default' => true]);
         }
 
@@ -97,13 +103,13 @@ class RoleController extends Controller
     }
 
     /**
-     * @return array{name: string, weight: int}
+     * @return array{name: string, percentage: int}
      */
     protected function validateRole(Request $request): array
     {
         return $request->validate([
             'name' => ['required', 'string', 'max:255'],
-            'weight' => ['required', 'integer', 'min:1', 'max:100'],
+            'percentage' => ['required', 'integer', 'min:0', 'max:100'],
             'is_default' => ['nullable', Rule::in(['1', '0', 'on'])],
         ]);
     }

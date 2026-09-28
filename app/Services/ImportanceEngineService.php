@@ -21,11 +21,7 @@ class ImportanceEngineService
 
     public function calculate($userRole, $taskType, $urgency = 1)
     {
-        $roleWeight = $this->roleWeights()[$userRole] ?? 1;
-
-        $taskWeight = $this->taskWeights[$taskType] ?? 1;
-
-        return $roleWeight + $taskWeight + $urgency;
+        return $this->roleScore((string) $userRole);
     }
 
     public function roleScore(string $userRole): int
@@ -48,7 +44,7 @@ class ImportanceEngineService
     protected function roleWeights(): array
     {
         if ($this->roleWeightsLoadedAt === 0.0 || (microtime(true) - $this->roleWeightsLoadedAt) > 5) {
-            $this->roleWeights = Role::query()->pluck('weight', 'slug')->map(fn ($weight) => (int) $weight)->all();
+            $this->roleWeights = Role::query()->pluck('percentage', 'slug')->map(fn ($percentage) => (int) $percentage)->all();
             $this->roleWeightsLoadedAt = microtime(true);
         }
 

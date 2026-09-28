@@ -21,7 +21,7 @@ class UserController extends Controller
 
     public function create(): View
     {
-        $roles = Role::query()->orderByDesc('weight')->get();
+        $roles = Role::query()->orderByDesc('percentage')->get();
 
         return view('users.create', compact('roles'));
     }
@@ -39,7 +39,7 @@ class UserController extends Controller
 
     public function edit(User $user): View
     {
-        $roles = Role::query()->orderByDesc('weight')->get();
+        $roles = Role::query()->orderByDesc('percentage')->get();
 
         return view('users.edit', compact('user', 'roles'));
     }

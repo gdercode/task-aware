@@ -9,7 +9,7 @@
             <div>
                 <p class="text-xs font-medium uppercase tracking-wider text-emerald-400">Management</p>
                 <h1 class="text-xl sm:text-2xl font-semibold text-white">Roles</h1>
-                <p class="text-sm text-slate-400 mt-1">Each role has a value. A higher value receives a larger share of the bandwidth pool.</p>
+                <p class="text-sm text-slate-400 mt-1">Percentages always add up to 100. Bandwidth is shared using these percentages.</p>
             </div>
             <a href="{{ route('roles.create') }}"
                class="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium transition-colors">
@@ -36,7 +36,7 @@
                     <thead>
                         <tr class="text-left text-slate-400 border-b border-slate-800">
                             <th class="px-5 py-3 font-medium">Role</th>
-                            <th class="px-5 py-3 font-medium">Value</th>
+                            <th class="px-5 py-3 font-medium">Percentage</th>
                             <th class="px-5 py-3 font-medium">Users</th>
                             <th class="px-5 py-3 font-medium text-right">Actions</th>
                         </tr>
@@ -50,7 +50,7 @@
                                         <span class="ml-2 inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/20 text-emerald-300">Default</span>
                                     @endif
                                 </td>
-                                <td class="px-5 py-3 font-mono text-emerald-400">{{ $role->weight }}</td>
+                                <td class="px-5 py-3 font-mono text-emerald-400">{{ $role->percentage }}%</td>
                                 <td class="px-5 py-3 text-slate-400">{{ $role->users_count }}</td>
                                 <td class="px-5 py-3 text-right">
                                     <div class="inline-flex items-center gap-2">
@@ -78,6 +78,15 @@
                             </tr>
                         @endforelse
                     </tbody>
+                    @if ($roles->isNotEmpty())
+                        <tfoot>
+                            <tr class="border-t border-slate-800 bg-slate-800/30">
+                                <td class="px-5 py-3 text-slate-400">Total</td>
+                                <td class="px-5 py-3 font-mono text-white">{{ $roles->sum('percentage') }}%</td>
+                                <td colspan="2"></td>
+                            </tr>
+                        </tfoot>
+                    @endif
                 </table>
             </div>
         </div>

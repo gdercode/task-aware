@@ -32,7 +32,7 @@
             class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500">
         @foreach ($roles as $role)
             <option value="{{ $role->slug }}" @selected(old('role', $user?->role ?? \App\Models\Role::defaultSlug()) === $role->slug)>
-                {{ $role->name }} ({{ $role->weight }})
+                {{ $role->name }} ({{ $role->percentage }}%)
             </option>
         @endforeach
     </select>

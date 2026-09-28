@@ -9,11 +9,11 @@
 </div>
 
 <div>
-    <label for="weight" class="block text-xs font-medium text-slate-400 mb-1">Value</label>
-    <input type="number" name="weight" id="weight" value="{{ old('weight', $role?->weight ?? 4) }}" required min="1" max="100"
+    <label for="percentage" class="block text-xs font-medium text-slate-400 mb-1">Percentage</label>
+    <input type="number" name="percentage" id="percentage" value="{{ old('percentage', $role?->percentage ?? 10) }}" required min="0" max="100"
            class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500">
-    <p class="text-xs text-slate-500 mt-1">Added into the importance score. A higher value gets a larger share of the pool. Current built-in values are Dean 10, Lecturer 7, Student 4.</p>
-    @error('weight')<p class="text-xs text-red-400 mt-1">{{ $message }}</p>@enderror
+    <p class="text-xs text-slate-500 mt-1">After you save, every role is recalculated so the percentages add up to 100. That percentage is what the system uses to share bandwidth.</p>
+    @error('percentage')<p class="text-xs text-red-400 mt-1">{{ $message }}</p>@enderror
 </div>
 
 <label class="flex items-center gap-2 text-sm text-slate-300">
