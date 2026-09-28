@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 
@@ -59,6 +60,32 @@ class UserController extends Controller
             ->with('success', 'User updated successfully.');
     }
 
+    public function registerFromRouter(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'role' => ['required', Rule::in(self::ROLES)],
+            'ip_address' => ['required', 'ip', Rule::unique('users', 'ip_address')],
+            'mac_address' => ['nullable', 'string', 'max:17', Rule::unique('users', 'mac_address')],
+        ]);
+
+        $mac = strtoupper(trim((string) ($validated['mac_address'] ?? '')));
+        $mac = preg_match('/^[0-9A-F]{2}(:[0-9A-F]{2}){5}$/', $mac) ? $mac : null;
+
+        User::create([
+            'name' => $validated['name'],
+            'email' => $this->deviceEmail($validated['ip_address']),
+            'password' => Str::password(32),
+            'role' => $validated['role'],
+            'ip_address' => $validated['ip_address'],
+            'mac_address' => $mac,
+        ]);
+
+        return redirect()
+            ->route('dashboard')
+            ->with('success', $validated['name'].' is registered at '.$validated['ip_address'].'.');
+    }
+
     public function destroy(User $user): RedirectResponse
     {
         $user->delete();
@@ -86,5 +113,19 @@ class UserController extends Controller
                 Rule::unique('users', 'ip_address')->ignore($user),
             ],
         ];
+    }
+
+    protected function deviceEmail(string $ip): string
+    {
+        $base = 'device-'.str_replace('.', '-', $ip);
+        $email = $base.'@devices.local';
+        $suffix = 2;
+
+        while (User::where('email', $email)->exists()) {
+            $email = $base.'-'.$suffix.'@devices.local';
+            $suffix++;
+        }
+
+        return $email;
     }
 }

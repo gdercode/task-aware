@@ -26,6 +26,9 @@ Route::post('/mikrotik-settings', [DashboardController::class, 'updateMikrotik']
 Route::get('/users/{user}/allocation-reports', [DashboardController::class, 'userReports'])
     ->name('allocation-reports');
 
+Route::post('/devices/register', [UserController::class, 'registerFromRouter'])
+    ->name('devices.register');
+
 Route::resource('users', UserController::class)->except(['show']);
 
 Route::get('/api/allocation-reports', function () {

@@ -3,7 +3,15 @@
 @section('title', 'AL Reports Dashboard')
 
 @push('head')
-    <meta http-equiv="refresh" content="5">
+    <script>
+        setInterval(function () {
+            var el = document.activeElement;
+            if (el && (el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA')) {
+                return;
+            }
+            location.reload();
+        }, 5000);
+    </script>
 @endpush
 
 @section('content')
