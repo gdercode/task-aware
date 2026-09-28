@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Role;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -11,8 +12,6 @@ use Illuminate\View\View;
 
 class UserController extends Controller
 {
-    private const ROLES = ['dean', 'lecturer', 'student'];
-
     public function index(): View
     {
         $users = User::orderBy('name')->paginate(15);
@@ -22,7 +21,7 @@ class UserController extends Controller
 
     public function create(): View
     {
-        $roles = self::ROLES;
+        $roles = Role::query()->orderByDesc('weight')->get();
 
         return view('users.create', compact('roles'));
     }
@@ -40,7 +39,7 @@ class UserController extends Controller
 
     public function edit(User $user): View
     {
-        $roles = self::ROLES;
+        $roles = Role::query()->orderByDesc('weight')->get();
 
         return view('users.edit', compact('user', 'roles'));
     }
@@ -64,7 +63,7 @@ class UserController extends Controller
     {
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
-            'role' => ['required', Rule::in(self::ROLES)],
+            'role' => ['required', 'string', Rule::exists('roles', 'slug')],
             'ip_address' => ['required', 'ip', Rule::unique('users', 'ip_address')],
             'mac_address' => ['nullable', 'string', 'max:17', Rule::unique('users', 'mac_address')],
         ]);
@@ -106,7 +105,7 @@ class UserController extends Controller
                 Rule::unique('users', 'email')->ignore($user),
             ],
             'password' => [$user ? 'nullable' : 'required', 'string', 'min:8'],
-            'role' => ['required', Rule::in(self::ROLES)],
+            'role' => ['required', 'string', Rule::exists('roles', 'slug')],
             'ip_address' => [
                 'nullable',
                 'ip',

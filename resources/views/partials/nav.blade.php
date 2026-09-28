@@ -22,6 +22,14 @@
                        ])>
                         Users
                     </a>
+                    <a href="{{ route('roles.index') }}"
+                       @class([
+                           'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
+                           'bg-slate-800 text-white' => request()->routeIs('roles.*'),
+                           'text-slate-400 hover:text-white hover:bg-slate-800/50' => !request()->routeIs('roles.*'),
+                       ])>
+                        Roles
+                    </a>
                 </div>
             </div>
             @hasSection('nav-actions')

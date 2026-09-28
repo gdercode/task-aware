@@ -31,7 +31,9 @@
     <select name="role" id="role" required
             class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500">
         @foreach ($roles as $role)
-            <option value="{{ $role }}" @selected(old('role', $user?->role) === $role)>{{ ucfirst($role) }}</option>
+            <option value="{{ $role->slug }}" @selected(old('role', $user?->role ?? \App\Models\Role::defaultSlug()) === $role->slug)>
+                {{ $role->name }} ({{ $role->weight }})
+            </option>
         @endforeach
     </select>
     @error('role')<p class="text-xs text-red-400 mt-1">{{ $message }}</p>@enderror

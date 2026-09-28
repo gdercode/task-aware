@@ -6,6 +6,7 @@ use App\Services\MikrotikService;
 use App\Services\TrafficDetectionService;
 use App\Services\ImportanceEngineService;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\RoleController;
 use App\Http\Controllers\UserController;
 use App\Models\BandwidthLog;
 use App\Models\Flow;
@@ -30,6 +31,8 @@ Route::post('/devices/register', [UserController::class, 'registerFromRouter'])
     ->name('devices.register');
 
 Route::resource('users', UserController::class)->except(['show']);
+
+Route::resource('roles', RoleController::class)->except(['show']);
 
 Route::get('/api/allocation-reports', function () {
     return BandwidthLog::with('user')

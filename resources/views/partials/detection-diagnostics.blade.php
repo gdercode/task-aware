@@ -81,8 +81,8 @@
                                             name="role"
                                             class="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500"
                                         >
-                                            @foreach (['student' => 'Student', 'lecturer' => 'Lecturer', 'dean' => 'Dean'] as $role => $label)
-                                                <option value="{{ $role }}" @selected(old('ip_address') === $device['ip'] && old('role') === $role)>{{ $label }}</option>
+                                            @foreach (\App\Models\Role::query()->orderByDesc('weight')->get() as $role)
+                                                <option value="{{ $role->slug }}" @selected(old('ip_address') === $device['ip'] ? old('role') === $role->slug : $role->is_default)>{{ $role->name }}</option>
                                             @endforeach
                                         </select>
                                         <button type="submit" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium">

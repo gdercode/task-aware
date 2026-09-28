@@ -2,13 +2,14 @@
 
 namespace App\Services;
 
+use App\Models\Role;
+
 class ImportanceEngineService
 {
-    protected $roleWeights = [
-        'dean' => 10,
-        'lecturer' => 7,
-        'student' => 4,
-    ];
+    /** @var array<string, int> */
+    protected array $roleWeights = [];
+
+    protected float $roleWeightsLoadedAt = 0;
 
     protected $taskWeights = [
         'REAL_TIME' => 8,
@@ -20,7 +21,7 @@ class ImportanceEngineService
 
     public function calculate($userRole, $taskType, $urgency = 1)
     {
-        $roleWeight = $this->roleWeights[$userRole] ?? 1;
+        $roleWeight = $this->roleWeights()[$userRole] ?? 1;
 
         $taskWeight = $this->taskWeights[$taskType] ?? 1;
 
@@ -29,7 +30,7 @@ class ImportanceEngineService
 
     public function roleScore(string $userRole): int
     {
-        return $this->roleWeights[$userRole] ?? 1;
+        return $this->roleWeights()[$userRole] ?? 1;
     }
 
     public function effectiveScore(int $baseScore, string $activityStatus, string $role): int
@@ -39,6 +40,19 @@ class ImportanceEngineService
             'low_usage' => $this->roleScore($role),
             default => $baseScore,
         };
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    protected function roleWeights(): array
+    {
+        if ($this->roleWeightsLoadedAt === 0.0 || (microtime(true) - $this->roleWeightsLoadedAt) > 5) {
+            $this->roleWeights = Role::query()->pluck('weight', 'slug')->map(fn ($weight) => (int) $weight)->all();
+            $this->roleWeightsLoadedAt = microtime(true);
+        }
+
+        return $this->roleWeights;
     }
 
     public function bandwidthFromScore($score)
