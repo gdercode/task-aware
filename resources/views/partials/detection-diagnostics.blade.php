@@ -2,8 +2,7 @@
     <div class="px-5 py-4 border-b border-slate-800">
         <h2 class="text-lg font-semibold text-white">Devices on the LAN</h2>
         <p class="text-sm text-slate-400 mt-1">
-            Only devices seen on the local network are listed. The WAN uplink, hotspot-only clients, and remote sites stay off this table.
-            Give a device a name if you want it tracked.
+            Only devices seen on the local network are listed. Last bandwidth use shows Now while traffic is moving, otherwise the last time that device used bandwidth.
         </p>
     </div>
 
@@ -28,7 +27,7 @@
                         <th class="px-5 py-3 font-medium">Address</th>
                         <th class="px-5 py-3 font-medium">Hardware address</th>
                         <th class="px-5 py-3 font-medium">Status</th>
-                        <th class="px-5 py-3 font-medium">Last connected</th>
+                        <th class="px-5 py-3 font-medium">Last bandwidth use</th>
                         <th class="px-5 py-3 font-medium">Name</th>
                     </tr>
                 </thead>
@@ -52,10 +51,10 @@
                                 @endif
                             </td>
                             <td class="px-5 py-3 text-slate-200">
-                                @if ($device['connected'] ?? true)
+                                @if ($device['using_bandwidth'] ?? false)
                                     Now
-                                @elseif (! empty($device['last_connected_at']))
-                                    {{ \Carbon\Carbon::parse($device['last_connected_at'])->timezone(config('app.timezone'))->format('M j, H:i') }}
+                                @elseif (! empty($device['last_bandwidth_at']))
+                                    {{ \Carbon\Carbon::parse($device['last_bandwidth_at'])->timezone(config('app.timezone'))->format('M j, H:i') }}
                                 @else
                                     —
                                 @endif

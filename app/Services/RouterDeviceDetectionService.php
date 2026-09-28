@@ -183,6 +183,8 @@ class RouterDeviceDetectionService
                 }
             }
 
+            $rateBps = (int) ($sources['connections']['details'][$ip]['rate_bps'] ?? 0);
+
             $devices[] = [
                 'ip' => $ip,
                 'mac' => $mac,
@@ -192,7 +194,7 @@ class RouterDeviceDetectionService
                 'registered_name' => $matched?->name,
                 'user_id' => $matched?->id,
                 'connected' => true,
-                'last_connected_at' => now()->toIso8601String(),
+                'using_bandwidth' => $rateBps > 0,
             ];
         }
 
@@ -213,28 +215,30 @@ class RouterDeviceDetectionService
         }
 
         $currentIps = [];
+        $seenOnLanAt = now()->toIso8601String();
 
-        foreach ($devices as $device) {
+        foreach ($devices as $index => $device) {
             $currentIps[$device['ip']] = true;
+            $previousBandwidthAt = $memory[$device['ip']]['last_bandwidth_at'] ?? null;
+            $lastBandwidthAt = ($device['using_bandwidth'] ?? false)
+                ? $seenOnLanAt
+                : $previousBandwidthAt;
+
+            $devices[$index]['last_bandwidth_at'] = $lastBandwidthAt;
             $memory[$device['ip']] = [
                 'ip' => $device['ip'],
                 'mac' => $device['mac'],
                 'hostname' => $device['hostname'],
-                'last_connected_at' => $device['last_connected_at'],
+                'last_seen_on_lan_at' => $seenOnLanAt,
+                'last_bandwidth_at' => $lastBandwidthAt,
             ];
         }
 
         $cutoff = now()->subDays(7);
 
         foreach ($memory as $ip => $row) {
-            if (empty($row['last_connected_at'])) {
-                unset($memory[$ip]);
-
-                continue;
-            }
-
-            $seenAt = \Carbon\Carbon::parse($row['last_connected_at']);
-            if ($seenAt->lt($cutoff)) {
+            $seenAt = $row['last_seen_on_lan_at'] ?? $row['last_connected_at'] ?? null;
+            if ($seenAt === null || \Carbon\Carbon::parse($seenAt)->lt($cutoff)) {
                 unset($memory[$ip]);
 
                 continue;
@@ -257,18 +261,23 @@ class RouterDeviceDetectionService
                 'registered_name' => $matched?->name,
                 'user_id' => $matched?->id,
                 'connected' => false,
-                'last_connected_at' => $seenAt->toIso8601String(),
+                'using_bandwidth' => false,
+                'last_bandwidth_at' => $row['last_bandwidth_at'] ?? null,
             ];
         }
 
         Cache::store('file')->forever($this->presenceCacheKey(), $memory);
 
         usort($devices, function (array $a, array $b) {
+            if (($a['using_bandwidth'] ?? false) !== ($b['using_bandwidth'] ?? false)) {
+                return ($a['using_bandwidth'] ?? false) ? -1 : 1;
+            }
+
             if (($a['connected'] ?? false) !== ($b['connected'] ?? false)) {
                 return ($a['connected'] ?? false) ? -1 : 1;
             }
 
-            return strcmp((string) ($b['last_connected_at'] ?? ''), (string) ($a['last_connected_at'] ?? ''));
+            return strcmp((string) ($b['last_bandwidth_at'] ?? ''), (string) ($a['last_bandwidth_at'] ?? ''));
         });
 
         return $devices;
@@ -330,8 +339,6 @@ class RouterDeviceDetectionService
      */
     protected function ipsFromConnectionRows(array $connections): array
     {
-        $ips = [];
-
         $details = [];
 
         foreach ($connections as $conn) {
@@ -341,9 +348,13 @@ class RouterDeviceDetectionService
             }
 
             $ip = $this->mikrotik->normalizeIp(explode(':', $addr)[0]);
-            if ($this->isLanClientIp($ip)) {
-                $details[$ip] = ['ip' => $ip];
+            if (! $this->isLanClientIp($ip)) {
+                continue;
             }
+
+            $rate = (int) ($conn['orig-rate'] ?? 0) + (int) ($conn['repl-rate'] ?? 0);
+            $details[$ip] ??= ['ip' => $ip, 'rate_bps' => 0];
+            $details[$ip]['rate_bps'] += $rate;
         }
 
         $list = array_keys($details);
