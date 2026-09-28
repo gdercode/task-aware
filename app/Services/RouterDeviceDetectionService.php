@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\User;
+use Illuminate\Support\Facades\Cache;
 
 class RouterDeviceDetectionService
 {
@@ -57,6 +58,10 @@ class RouterDeviceDetectionService
         $ipSources = [];
 
         foreach ($devices as $device) {
+            if (! ($device['connected'] ?? false)) {
+                continue;
+            }
+
             $onlineIps[$device['ip']] = true;
             $ipSources[$device['ip']] = $device['via'];
         }
@@ -86,8 +91,7 @@ class RouterDeviceDetectionService
     }
 
     /**
-     * LAN clients that are on the router: internet flows, DHCP leases, or hotspot sessions.
-     * Remote website addresses are not devices.
+     * Devices present on a LAN interface (ARP), not the WAN uplink, hotspot-only clients, or remote sites.
      *
      * @param  array<string, array{count: int, error: ?string, ips: list<string>, details?: array<string, array<string, mixed>>}>  $sources
      * @return list<array<string, mixed>>
@@ -95,6 +99,7 @@ class RouterDeviceDetectionService
     protected function devicesOnRouter(array $sources): array
     {
         $routerIps = $this->routerIps();
+        $wan = $this->wanEdge();
         $internet = [];
 
         foreach ($sources['connections']['ips'] ?? [] as $ip) {
@@ -103,14 +108,19 @@ class RouterDeviceDetectionService
             }
         }
 
-        $candidates = $internet;
+        $candidates = [];
 
-        foreach (['dhcp', 'hotspot'] as $sourceName) {
-            foreach ($sources[$sourceName]['details'] ?? [] as $ip => $detail) {
-                if ($this->isLanClientIp($ip) && ! isset($routerIps[$ip])) {
-                    $candidates[$ip] = true;
-                }
+        foreach ($sources['arp']['details'] ?? [] as $ip => $detail) {
+            if (! $this->isLanClientIp($ip) || isset($routerIps[$ip]) || isset($wan['gateways'][$ip])) {
+                continue;
             }
+
+            $interface = (string) ($detail['interface'] ?? '');
+            if ($interface !== '' && isset($wan['interfaces'][$interface])) {
+                continue;
+            }
+
+            $candidates[$ip] = true;
         }
 
         $knownUsers = User::query()
@@ -181,18 +191,92 @@ class RouterDeviceDetectionService
                 'using_internet' => isset($internet[$ip]),
                 'registered_name' => $matched?->name,
                 'user_id' => $matched?->id,
+                'connected' => true,
+                'last_connected_at' => now()->toIso8601String(),
             ];
         }
 
-        usort($devices, function (array $a, array $b) {
-            if ($a['using_internet'] !== $b['using_internet']) {
-                return $a['using_internet'] ? -1 : 1;
+        return $this->mergeRememberedDevices($devices, $byIp, $byMac);
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $devices
+     * @param  \Illuminate\Support\Collection<string, User>  $byIp
+     * @param  \Illuminate\Support\Collection<string, User>  $byMac
+     * @return list<array<string, mixed>>
+     */
+    protected function mergeRememberedDevices(array $devices, $byIp, $byMac): array
+    {
+        $memory = Cache::store('file')->get($this->presenceCacheKey(), []);
+        if (! is_array($memory)) {
+            $memory = [];
+        }
+
+        $currentIps = [];
+
+        foreach ($devices as $device) {
+            $currentIps[$device['ip']] = true;
+            $memory[$device['ip']] = [
+                'ip' => $device['ip'],
+                'mac' => $device['mac'],
+                'hostname' => $device['hostname'],
+                'last_connected_at' => $device['last_connected_at'],
+            ];
+        }
+
+        $cutoff = now()->subDays(7);
+
+        foreach ($memory as $ip => $row) {
+            if (empty($row['last_connected_at'])) {
+                unset($memory[$ip]);
+
+                continue;
             }
 
-            return strcmp($a['ip'], $b['ip']);
+            $seenAt = \Carbon\Carbon::parse($row['last_connected_at']);
+            if ($seenAt->lt($cutoff)) {
+                unset($memory[$ip]);
+
+                continue;
+            }
+
+            if (isset($currentIps[$ip])) {
+                continue;
+            }
+
+            $mac = $this->normalizeMac($row['mac'] ?? null);
+            $matched = $mac ? $byMac->get($mac) : null;
+            $matched ??= $byIp->get($this->mikrotik->normalizeIp($ip));
+
+            $devices[] = [
+                'ip' => $ip,
+                'mac' => $mac,
+                'hostname' => $row['hostname'] ?? null,
+                'via' => [],
+                'using_internet' => false,
+                'registered_name' => $matched?->name,
+                'user_id' => $matched?->id,
+                'connected' => false,
+                'last_connected_at' => $seenAt->toIso8601String(),
+            ];
+        }
+
+        Cache::store('file')->forever($this->presenceCacheKey(), $memory);
+
+        usort($devices, function (array $a, array $b) {
+            if (($a['connected'] ?? false) !== ($b['connected'] ?? false)) {
+                return ($a['connected'] ?? false) ? -1 : 1;
+            }
+
+            return strcmp((string) ($b['last_connected_at'] ?? ''), (string) ($a['last_connected_at'] ?? ''));
         });
 
         return $devices;
+    }
+
+    protected function presenceCacheKey(): string
+    {
+        return 'bandwidth.lan_presence';
     }
 
     protected function notDetectedReason(string $ip): string
@@ -223,6 +307,7 @@ class RouterDeviceDetectionService
             return [
                 'ip' => $ip,
                 'mac' => $this->normalizeMac($row['mac-address'] ?? null),
+                'interface' => trim((string) ($row['interface'] ?? '')) ?: null,
             ];
         });
     }
@@ -336,6 +421,10 @@ class RouterDeviceDetectionService
                     $current['hostname'] = $device['hostname'];
                 }
 
+                if (! empty($device['interface'])) {
+                    $current['interface'] = $device['interface'];
+                }
+
                 $details[$ip] = $current;
             }
 
@@ -346,6 +435,57 @@ class RouterDeviceDetectionService
         } catch (\Throwable $e) {
             return ['count' => 0, 'error' => $e->getMessage(), 'ips' => [], 'details' => []];
         }
+    }
+
+    /**
+     * WAN uplink from the active default route, so those neighbors are not listed as LAN devices.
+     *
+     * @return array{interfaces: array<string, true>, gateways: array<string, true>}
+     */
+    protected function wanEdge(): array
+    {
+        $interfaces = [];
+        $gateways = [];
+
+        try {
+            foreach ($this->mikrotik->getRouterClient()->query('/ip/route/print')->read() as $row) {
+                if (($row['dst-address'] ?? '') !== '0.0.0.0/0') {
+                    continue;
+                }
+
+                $active = $row['active'] ?? true;
+                if ($active === 'false' || $active === false) {
+                    continue;
+                }
+
+                foreach (['gateway', 'immediate-gw'] as $field) {
+                    $gateway = (string) ($row[$field] ?? '');
+                    if (! str_contains($gateway, '%')) {
+                        $ip = $this->mikrotik->normalizeIp($gateway);
+                        if ($this->isLanClientIp($ip)) {
+                            $gateways[$ip] = true;
+                        }
+
+                        continue;
+                    }
+
+                    [$address, $interface] = explode('%', $gateway, 2);
+                    $interface = trim($interface);
+                    if ($interface !== '') {
+                        $interfaces[$interface] = true;
+                    }
+
+                    $ip = $this->mikrotik->normalizeIp($address);
+                    if ($this->isLanClientIp($ip)) {
+                        $gateways[$ip] = true;
+                    }
+                }
+            }
+        } catch (\Throwable) {
+            return ['interfaces' => [], 'gateways' => []];
+        }
+
+        return ['interfaces' => $interfaces, 'gateways' => $gateways];
     }
 
     /**

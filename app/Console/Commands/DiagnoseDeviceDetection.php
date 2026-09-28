@@ -30,10 +30,10 @@ class DiagnoseDeviceDetection extends Command
         }
 
         $this->newLine();
-        $this->info('Devices on the router');
+        $this->info('Devices on the LAN');
 
         foreach ($report['devices'] ?? [] as $device) {
-            $state = $device['using_internet'] ? 'using the internet' : 'connected, idle';
+            $state = ($device['connected'] ?? false) ? 'now' : ($device['last_connected_at'] ?? 'unknown');
             $name = $device['registered_name'] ?: 'unregistered';
             $mac = $device['mac'] ?: 'no mac';
             $this->line("  {$device['ip']}  {$mac}  {$name}  ({$state})");

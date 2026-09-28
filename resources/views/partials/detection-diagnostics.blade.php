@@ -1,9 +1,9 @@
 <div class="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden" data-device-register>
     <div class="px-5 py-4 border-b border-slate-800">
-        <h2 class="text-lg font-semibold text-white">Devices using the router</h2>
+        <h2 class="text-lg font-semibold text-white">Devices on the LAN</h2>
         <p class="text-sm text-slate-400 mt-1">
-            Each address below is a device on this router that is online or already passing traffic.
-            Give it a name if you want it tracked. Website addresses are not listed.
+            Only devices seen on the local network are listed. The WAN uplink, hotspot-only clients, and remote sites stay off this table.
+            Give a device a name if you want it tracked.
         </p>
     </div>
 
@@ -19,8 +19,7 @@
             </div>
         @elseif ($devices === [])
             <div class="px-5 py-8 text-sm text-slate-400">
-                No client devices are on the router right now. A phone or computer has to be connected
-                (DHCP, hotspot, or an internet connection) before its address shows up here.
+                No devices are on the LAN right now. A phone or computer has to be connected to the local network before its address shows up here.
             </div>
         @else
             <table class="w-full text-sm">
@@ -29,6 +28,7 @@
                         <th class="px-5 py-3 font-medium">Address</th>
                         <th class="px-5 py-3 font-medium">Hardware address</th>
                         <th class="px-5 py-3 font-medium">Status</th>
+                        <th class="px-5 py-3 font-medium">Last connected</th>
                         <th class="px-5 py-3 font-medium">Name</th>
                     </tr>
                 </thead>
@@ -45,10 +45,19 @@
                                 {{ $device['mac'] ?: '—' }}
                             </td>
                             <td class="px-5 py-3">
-                                @if ($device['using_internet'])
-                                    <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/20 text-emerald-300">Using the internet</span>
+                                @if ($device['connected'] ?? true)
+                                    <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/20 text-emerald-300">On the LAN</span>
                                 @else
-                                    <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-slate-700 text-slate-300">Connected, idle</span>
+                                    <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-slate-700 text-slate-300">Left the LAN</span>
+                                @endif
+                            </td>
+                            <td class="px-5 py-3 text-slate-200">
+                                @if ($device['connected'] ?? true)
+                                    Now
+                                @elseif (! empty($device['last_connected_at']))
+                                    {{ \Carbon\Carbon::parse($device['last_connected_at'])->timezone(config('app.timezone'))->format('M j, H:i') }}
+                                @else
+                                    —
                                 @endif
                             </td>
                             <td class="px-5 py-3">
