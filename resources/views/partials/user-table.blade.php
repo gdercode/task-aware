@@ -79,7 +79,7 @@
                                     <span class="font-mono font-semibold text-emerald-400">{{ number_format($row->share_kbps ?? 0) }}</span>
                                     <span class="text-xs text-slate-500"> Kbps</span>
                                     @if (($row->share_percent ?? 0) > 0)
-                                        <span class="block text-xs text-slate-500">{{ $row->share_percent }}% of pool</span>
+                                        <span class="block text-xs text-slate-500">{{ $row->share_percent }}% of active devices</span>
                                     @endif
                                 </td>
                                 <td class="px-5 py-3">

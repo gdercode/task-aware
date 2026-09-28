@@ -86,7 +86,17 @@ class RunBandwidthAllocator extends Command
             $connectionError,
         );
         $onlineIps = $detection['online_ips'];
+        $activeIps = [];
+        foreach ($detection['devices'] ?? [] as $device) {
+            if (($device['connected'] ?? false) && ($device['using_bandwidth'] ?? false)) {
+                $ip = $mikrotik->normalizeIp($device['ip'] ?? null);
+                if ($ip !== '') {
+                    $activeIps[$ip] = true;
+                }
+            }
+        }
         $this->line('Devices online on router: '.count($onlineIps));
+        $this->line('Devices using bandwidth now: '.count($activeIps));
 
         if ($connectionError === null) {
             try {
@@ -111,7 +121,16 @@ class RunBandwidthAllocator extends Command
         $poolMeasure = $mikrotik->poolFromMeasurements($interfaceKbps, $interfaceError, $connections);
         $interfaceTraffic = $mikrotik->interfaceTrafficSnapshot($monitor, $interfaceError ? null : $interfaceKbps);
         $throughput = $mikrotik->measureUserThroughputKbps($connections);
-        $allocation = $allocationPreview->build($poolMeasure['kbps'], $onlineIps, $throughput);
+        $allocation = $allocationPreview->build($poolMeasure['kbps'], $onlineIps, $throughput, $activeIps);
+        $sharesByUser = $allocation['users']->keyBy(fn ($row) => $row->user->id);
+        foreach ($detection['devices'] ?? [] as $index => $device) {
+            $row = isset($device['user_id']) ? $sharesByUser->get($device['user_id']) : null;
+            $detection['devices'][$index]['role_percentage'] = $row->role_percentage ?? null;
+            $detection['devices'][$index]['share_percent'] = ($device['using_bandwidth'] ?? false)
+                ? (float) ($row->share_percent ?? 0)
+                : 0;
+        }
+        $detection['active_weight_total'] = (int) ($allocation['total_score'] ?? 0);
         $warning = $snapshot->measurementWarning($poolMeasure, $allocation, $interfaceTraffic, $detection);
 
         $snapshot->publishLive($detection, $poolMeasure, $interfaceTraffic, $allocation, $warning);

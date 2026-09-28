@@ -16,6 +16,7 @@ class AllocationPreviewService
     /**
      * @param  array<string, true>  $onlineIps
      * @param  array<int, array{download_kbps: int, upload_kbps: int, total_kbps: int}>|null  $userThroughput
+     * @param  array<string, true>  $activeIps  Devices whose last bandwidth use is Now
      * @return array{
      *     pool_kbps: int,
      *     measured_pool_kbps: int,
@@ -29,14 +30,14 @@ class AllocationPreviewService
      *     users: Collection
      * }
      */
-    public function build(int $poolKbps, array $onlineIps = [], ?array $userThroughput = null): array
+    public function build(int $poolKbps, array $onlineIps = [], ?array $userThroughput = null, array $activeIps = []): array
     {
         $measuredPoolKbps = max(0, $poolKbps);
         $monitoredUsers = User::whereNotNull('ip_address')->orderBy('name')->get();
-        $entries = $this->buildEntries($monitoredUsers, $onlineIps);
+        $entries = $this->buildEntries($monitoredUsers, $onlineIps, $activeIps);
 
         $allocatableScores = collect($entries)
-            ->filter(fn ($entry) => $entry['is_online'] && $entry['effective_score'] > 0)
+            ->filter(fn ($entry) => $entry['using_bandwidth'] && $entry['effective_score'] > 0)
             ->mapWithKeys(fn ($entry, $userId) => [$userId => $entry['effective_score']])
             ->all();
 
@@ -177,40 +178,30 @@ class AllocationPreviewService
     /**
      * @param  Collection<int, User>  $monitoredUsers
      * @param  array<string, true>  $onlineIps
+     * @param  array<string, true>  $activeIps
      * @return array<int, array<string, mixed>>
      */
-    protected function buildEntries(Collection $monitoredUsers, array $onlineIps): array
+    protected function buildEntries(Collection $monitoredUsers, array $onlineIps, array $activeIps): array
     {
         $entries = [];
 
         foreach ($monitoredUsers as $user) {
+            $ip = $this->mikrotik->normalizeIp($user->ip_address);
             $isOnline = $this->mikrotik->isDeviceOnline($user->ip_address, $onlineIps);
-            $activityStatus = $isOnline ? $user->activity_status : 'offline';
-            $baseScore = (int) $user->base_score;
-            $effectiveScore = ($isOnline && $activityStatus !== 'offline' && $activityStatus !== 'idle')
-                ? (int) $user->effective_score
-                : 0;
-
-            if ($isOnline && ($activityStatus === 'unknown' || ($effectiveScore === 0 && $activityStatus !== 'idle'))) {
-                $baseScore = $baseScore > 0
-                    ? $baseScore
-                    : $this->engine->calculate($user->role, $user->current_task_type ?? 'NORMAL', 1);
-                $activityStatus = 'low_usage';
-                $effectiveScore = $this->engine->effectiveScore($baseScore, 'low_usage', $user->role);
-            }
-
-            if (! $isOnline) {
-                $effectiveScore = 0;
-                $activityStatus = 'offline';
-            }
+            $usingBandwidth = $isOnline && $ip !== '' && isset($activeIps[$ip]);
+            $activityStatus = $isOnline ? ($user->activity_status ?: 'unknown') : 'offline';
+            $rolePercentage = $this->engine->roleScore((string) $user->role);
+            $effectiveScore = $usingBandwidth ? $rolePercentage : 0;
 
             $entries[$user->id] = [
                 'user' => $user,
-                'base_score' => $baseScore,
+                'base_score' => $rolePercentage,
+                'role_percentage' => $rolePercentage,
                 'effective_score' => $effectiveScore,
                 'activity_status' => $activityStatus,
                 'task_type' => $user->current_task_type ?? 'NORMAL',
                 'is_online' => $isOnline,
+                'using_bandwidth' => $usingBandwidth,
             ];
         }
 
@@ -249,10 +240,12 @@ class AllocationPreviewService
                 'user' => $entry['user'],
                 'score' => $entry['effective_score'],
                 'base_score' => $entry['base_score'],
+                'role_percentage' => $entry['role_percentage'],
                 'activity_status' => $entry['activity_status'],
                 'activity_label' => $this->activity->activityLabel($entry['activity_status']),
                 'task_type' => $entry['task_type'],
                 'is_online' => $entry['is_online'],
+                'using_bandwidth' => $entry['using_bandwidth'],
                 'share_percent' => $sharePercent,
                 'share_kbps' => $shareKbps,
                 'kbps_display' => $this->engine->formatKbpsDisplay($shareKbps),

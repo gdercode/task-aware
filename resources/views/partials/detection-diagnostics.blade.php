@@ -2,7 +2,8 @@
     <div class="px-5 py-4 border-b border-slate-800">
         <h2 class="text-lg font-semibold text-white">Devices on the LAN</h2>
         <p class="text-sm text-slate-400 mt-1">
-            Only devices seen on the local network are listed. Last bandwidth use shows Now while traffic is moving, otherwise the last time that device used bandwidth.
+            Only devices seen on the local network are listed. Last bandwidth use shows Now while traffic is moving.
+            The role percentages of devices on Now are added together, and each of those devices is given a new share from its weight.
         </p>
     </div>
 
@@ -28,6 +29,8 @@
                         <th class="px-5 py-3 font-medium">Hardware address</th>
                         <th class="px-5 py-3 font-medium">Status</th>
                         <th class="px-5 py-3 font-medium">Last bandwidth use</th>
+                        <th class="px-5 py-3 font-medium text-right">Weight</th>
+                        <th class="px-5 py-3 font-medium text-right">Share</th>
                         <th class="px-5 py-3 font-medium">Name</th>
                     </tr>
                 </thead>
@@ -55,6 +58,16 @@
                                     Now
                                 @elseif (! empty($device['last_bandwidth_at']))
                                     {{ \Carbon\Carbon::parse($device['last_bandwidth_at'])->timezone(config('app.timezone'))->format('M j, H:i') }}
+                                @else
+                                    —
+                                @endif
+                            </td>
+                            <td class="px-5 py-3 text-right font-mono text-slate-300">
+                                {{ isset($device['role_percentage']) ? $device['role_percentage'].'%' : '—' }}
+                            </td>
+                            <td class="px-5 py-3 text-right font-mono text-emerald-300">
+                                @if (($device['using_bandwidth'] ?? false) && ($device['share_percent'] ?? 0) > 0)
+                                    {{ $device['share_percent'] }}%
                                 @else
                                     —
                                 @endif
@@ -100,6 +113,11 @@
                     @endforeach
                 </tbody>
             </table>
+            @if (($detection['active_weight_total'] ?? 0) > 0)
+                <p class="px-5 py-3 text-xs text-slate-500 border-t border-slate-800">
+                    Devices using bandwidth now add up to {{ $detection['active_weight_total'] }}. Each share above is that device's weight divided by this total, and that share is what receives bandwidth.
+                </p>
+            @endif
         @endif
     </div>
 </div>

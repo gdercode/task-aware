@@ -88,7 +88,7 @@
                             <td class="px-5 py-3 text-right font-mono font-semibold {{ $allocated > 0 ? 'text-emerald-400' : 'text-slate-500' }}">
                                 {{ number_format($allocated) }}
                                 <span class="block text-xs font-normal text-slate-500">
-                                    {{ $row->share_percent > 0 ? $row->share_percent.'% of pool' : 'Kbps' }}
+                                    {{ $row->share_percent > 0 ? $row->share_percent.'% share' : 'Kbps' }}
                                 </span>
                             </td>
                             <td class="px-5 py-3 min-w-[160px]">

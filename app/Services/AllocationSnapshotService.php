@@ -38,6 +38,8 @@ class AllocationSnapshotService
                 'user_id' => $row->user->id,
                 'score' => $row->score,
                 'base_score' => $row->base_score,
+                'role_percentage' => $row->role_percentage ?? $row->base_score,
+                'using_bandwidth' => (bool) ($row->using_bandwidth ?? false),
                 'activity_status' => $row->activity_status,
                 'activity_label' => $row->activity_label,
                 'task_type' => $row->task_type,
@@ -366,10 +368,11 @@ class AllocationSnapshotService
                 'impact_detail' => $row?->impact_detail ?? '',
                 'task_label' => $row?->task_label ?? null,
                 'task_effect' => $row?->task_effect ?? null,
-                'offline_reason' => match ($status) {
-                    'offline' => 'Device offline',
-                    'idle' => 'Idle — no internet use',
-                    'low_usage' => 'Low usage — minimal share',
+                'offline_reason' => match (true) {
+                    (bool) ($row?->is_online ?? false) && ! (bool) ($row?->using_bandwidth ?? false) => 'Not using bandwidth now',
+                    $status === 'offline' => 'Device offline',
+                    $status === 'idle' => 'Idle — no internet use',
+                    $status === 'low_usage' => 'Not using bandwidth now',
                     default => 'No bandwidth allocated',
                 },
             ]);
