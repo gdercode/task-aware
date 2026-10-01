@@ -1,89 +1,116 @@
 @php
-    $chartRoles = \App\Models\Role::query()->orderByDesc('percentage')->orderBy('name')->get();
-    $palette = ['#34d399', '#38bdf8', '#a78bfa', '#fbbf24', '#fb7185', '#2dd4bf', '#f472b6', '#94a3b8'];
-    $roleColor = [];
-    foreach ($chartRoles as $index => $role) {
-        $roleColor[$role->slug] = $palette[$index % count($palette)];
-    }
+    $rows = collect($allocation['users'] ?? []);
+    $points = [];
 
-    $sharing = collect($allocation['users'] ?? [])->filter(fn ($row) => (int) ($row->share_kbps ?? 0) > 0)->values();
-    $bars = [];
-
-    if ($sharing->isNotEmpty()) {
-        foreach ($sharing as $row) {
-            $bars[] = [
+    if ($rows->isNotEmpty()) {
+        foreach ($rows as $row) {
+            $points[] = [
                 'label' => $row->user->name,
-                'value' => (float) $row->share_percent,
-                'caption' => number_format((int) $row->share_kbps).' Kbps',
-                'color' => $roleColor[$row->user->role] ?? '#94a3b8',
+                'down' => (int) ($row->throughput_down_kbps ?? 0),
+                'up' => (int) ($row->throughput_up_kbps ?? 0),
+                'used' => (int) ($row->throughput_total_kbps ?? 0),
+                'allocated' => (int) ($row->share_kbps ?? 0),
             ];
         }
-        $heading = 'Live share';
-        $note = 'Each column is that device’s queue as a percent of the pool.';
     } else {
-        foreach ($chartRoles as $role) {
-            if ((int) $role->percentage <= 0) {
-                continue;
-            }
-            $bars[] = [
-                'label' => $role->name,
-                'value' => (int) $role->percentage,
-                'caption' => $role->percentage.'% weight',
-                'color' => $roleColor[$role->slug],
+        foreach ($users ?? [] as $user) {
+            $points[] = [
+                'label' => $user->name,
+                'down' => 0,
+                'up' => 0,
+                'used' => 0,
+                'allocated' => 0,
             ];
         }
-        $heading = 'Role weights';
-        $note = 'These weights are what a device carries while it is using bandwidth.';
     }
 
-    $plotLeft = 44;
+    usort($points, function (array $a, array $b) {
+        return [$b['used'], $a['label']] <=> [$a['used'], $b['label']];
+    });
+
+    $totalDown = array_sum(array_column($points, 'down'));
+    $totalUp = array_sum(array_column($points, 'up'));
+    $totalUsed = array_sum(array_column($points, 'used'));
+    $peak = 0;
+    foreach ($points as $point) {
+        $peak = max($peak, $point['used'], $point['allocated']);
+    }
+    $axisMax = $peak > 0 ? (int) max($peak, ceil($peak / 4) * 4) : 100;
+
+    $plotLeft = 52;
     $plotRight = 16;
     $plotTop = 16;
-    $plotBottom = 72;
+    $plotBottom = 78;
     $width = 720;
-    $height = 280;
+    $height = 300;
     $plotWidth = $width - $plotLeft - $plotRight;
     $plotHeight = $height - $plotTop - $plotBottom;
-    $count = max(1, count($bars));
+    $count = max(1, count($points));
     $slot = $plotWidth / $count;
-    $barWidth = min(72, $slot * 0.55);
+    $barWidth = min(28, $slot * 0.28);
 @endphp
 
 <div class="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden">
-    <div class="px-5 py-4 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2 border-b border-slate-800">
+    <div class="px-5 py-4 border-b border-slate-800 flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3">
         <div>
-            <h2 class="text-lg font-semibold text-white">{{ $heading }}</h2>
-            <p class="text-sm text-slate-400 mt-1">{{ $note }}</p>
+            <h2 class="text-lg font-semibold text-white">How data is used</h2>
+            <p class="text-sm text-slate-400 mt-1">Download and upload are moving now. The green column is the queue that device was given.</p>
         </div>
-        @if ($sharing->isNotEmpty())
-            <p class="text-sm font-mono text-slate-300">{{ number_format((int) ($allocation['pool_kbps'] ?? 0)) }} Kbps pool</p>
-        @endif
+        <dl class="flex flex-wrap gap-x-5 gap-y-1 text-sm">
+            <div>
+                <dt class="text-slate-500">Download</dt>
+                <dd class="font-mono text-sky-300">{{ number_format($totalDown) }} Kbps</dd>
+            </div>
+            <div>
+                <dt class="text-slate-500">Upload</dt>
+                <dd class="font-mono text-violet-300">{{ number_format($totalUp) }} Kbps</dd>
+            </div>
+            <div>
+                <dt class="text-slate-500">In use</dt>
+                <dd class="font-mono text-white">{{ number_format($totalUsed) }} Kbps</dd>
+            </div>
+        </dl>
     </div>
 
-    @if ($bars === [])
-        <p class="px-5 py-10 text-sm text-slate-500">No roles yet. Add a role and set its percentage to see the chart.</p>
+    @if ($points === [])
+        <p class="px-5 py-10 text-sm text-slate-500">No devices are registered, so there is no data use to show.</p>
     @else
-        <div class="px-3 pt-4 pb-2 overflow-x-auto">
-            <svg viewBox="0 0 {{ $width }} {{ $height }}" class="w-full min-w-[520px] h-72" role="img" aria-label="{{ $heading }}">
-                @foreach ([0, 25, 50, 75, 100] as $tick)
-                    @php $y = $plotTop + $plotHeight - ($tick / 100 * $plotHeight); @endphp
+        <div class="px-5 pt-3 flex flex-wrap gap-4 text-xs text-slate-400">
+            <span class="inline-flex items-center gap-2"><span class="h-2.5 w-2.5 rounded-sm bg-sky-400"></span> Download</span>
+            <span class="inline-flex items-center gap-2"><span class="h-2.5 w-2.5 rounded-sm bg-violet-400"></span> Upload</span>
+            <span class="inline-flex items-center gap-2"><span class="h-2.5 w-2.5 rounded-sm bg-emerald-400"></span> Allocated queue</span>
+        </div>
+        <div class="px-3 pt-2 pb-2 overflow-x-auto">
+            <svg viewBox="0 0 {{ $width }} {{ $height }}" class="w-full min-w-[520px] h-72" role="img" aria-label="Data in use compared with each device queue">
+                @foreach ([0, 0.25, 0.5, 0.75, 1] as $fraction)
+                    @php
+                        $y = $plotTop + $plotHeight - ($fraction * $plotHeight);
+                        $tick = (int) round($axisMax * $fraction);
+                    @endphp
                     <line x1="{{ $plotLeft }}" y1="{{ $y }}" x2="{{ $width - $plotRight }}" y2="{{ $y }}" stroke="#1e293b" stroke-width="1"></line>
-                    <text x="{{ $plotLeft - 8 }}" y="{{ $y + 4 }}" text-anchor="end" fill="#64748b" font-size="12" font-family="ui-sans-serif, system-ui, sans-serif">{{ $tick }}%</text>
+                    <text x="{{ $plotLeft - 8 }}" y="{{ $y + 4 }}" text-anchor="end" fill="#64748b" font-size="12" font-family="ui-sans-serif, system-ui, sans-serif">{{ number_format($tick) }}</text>
                 @endforeach
 
-                @foreach ($bars as $index => $bar)
+                @foreach ($points as $index => $point)
                     @php
-                        $value = max(0, min(100, (float) $bar['value']));
-                        $barHeight = $value / 100 * $plotHeight;
-                        $x = $plotLeft + ($index * $slot) + (($slot - $barWidth) / 2);
-                        $y = $plotTop + $plotHeight - $barHeight;
+                        $center = $plotLeft + ($index * $slot) + ($slot / 2);
+                        $usedX = $center - $barWidth - 3;
+                        $allocatedX = $center + 3;
+                        $downHeight = $axisMax > 0 ? ($point['down'] / $axisMax) * $plotHeight : 0;
+                        $upHeight = $axisMax > 0 ? ($point['up'] / $axisMax) * $plotHeight : 0;
+                        $allocatedHeight = $axisMax > 0 ? ($point['allocated'] / $axisMax) * $plotHeight : 0;
+                        $base = $plotTop + $plotHeight;
                     @endphp
-                    <rect x="{{ $x }}" y="{{ $y }}" width="{{ $barWidth }}" height="{{ max($barHeight, 0) }}" rx="6" fill="{{ $bar['color'] }}"></rect>
-                    <text x="{{ $x + ($barWidth / 2) }}" y="{{ max($plotTop + 14, $y - 8) }}" text-anchor="middle" fill="#e2e8f0" font-size="13" font-family="ui-sans-serif, system-ui, sans-serif" font-weight="600">{{ rtrim(rtrim(number_format($value, 1), '0'), '.') }}%</text>
-                    <text x="{{ $x + ($barWidth / 2) }}" y="{{ $plotTop + $plotHeight + 22 }}" text-anchor="middle" fill="#e2e8f0" font-size="13" font-family="ui-sans-serif, system-ui, sans-serif">{{ \Illuminate\Support\Str::limit($bar['label'], 16) }}</text>
-                    <text x="{{ $x + ($barWidth / 2) }}" y="{{ $plotTop + $plotHeight + 40 }}" text-anchor="middle" fill="#94a3b8" font-size="12" font-family="ui-monospace, monospace">{{ $bar['caption'] }}</text>
+                    <rect x="{{ $usedX }}" y="{{ $base - $downHeight }}" width="{{ $barWidth }}" height="{{ max($downHeight, 0) }}" rx="4" fill="#38bdf8"></rect>
+                    <rect x="{{ $usedX }}" y="{{ $base - $downHeight - $upHeight }}" width="{{ $barWidth }}" height="{{ max($upHeight, 0) }}" rx="4" fill="#a78bfa"></rect>
+                    <rect x="{{ $allocatedX }}" y="{{ $base - $allocatedHeight }}" width="{{ $barWidth }}" height="{{ max($allocatedHeight, 0) }}" rx="4" fill="#34d399"></rect>
+                    <text x="{{ $center }}" y="{{ $base + 22 }}" text-anchor="middle" fill="#e2e8f0" font-size="13" font-family="ui-sans-serif, system-ui, sans-serif">{{ \Illuminate\Support\Str::limit($point['label'], 14) }}</text>
+                    <text x="{{ $center }}" y="{{ $base + 40 }}" text-anchor="middle" fill="#94a3b8" font-size="12" font-family="ui-monospace, monospace">{{ number_format($point['used']) }} Kbps</text>
                 @endforeach
             </svg>
         </div>
+        @if ($totalUsed === 0)
+            <p class="px-5 pb-4 text-sm text-slate-500">No data is moving on these devices right now.</p>
+        @endif
     @endif
 </div>
