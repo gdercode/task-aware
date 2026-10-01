@@ -103,6 +103,8 @@
             </div>
         @endif
 
+        @include('partials.allocation-graph', ['allocation' => $allocation])
+
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
             <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
                 <p class="text-sm text-slate-400">Getting Bandwidth</p>

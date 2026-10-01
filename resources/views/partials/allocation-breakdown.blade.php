@@ -20,8 +20,8 @@
             </span>
         </p>
         <p class="text-xs text-slate-500 mt-2">
-            The kind of traffic sets the share. Real-time takes more of the pool, streaming and bulk downloads take less.
-            When live use fills a share, that queue is what holds the extra traffic back.
+            The queue comes from the role weight of each device that is using bandwidth now.
+            When live use fills that queue, the limit is what holds the extra traffic back.
         </p>
     </div>
     <div class="overflow-x-auto">
