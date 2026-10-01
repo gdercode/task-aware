@@ -53,6 +53,8 @@
     </header>
 
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        @include('partials.allocation-graph', ['allocation' => $allocation])
+
         @if (session('success'))
             <div class="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
                 {{ session('success') }}
@@ -102,8 +104,6 @@
                 MikroTik is connected but no monitored user traffic was detected. Ensure user IP addresses match active connections on the router, then run <code class="text-emerald-300">php artisan bandwidth:run</code>.
             </div>
         @endif
-
-        @include('partials.allocation-graph', ['allocation' => $allocation])
 
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
             <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
