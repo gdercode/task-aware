@@ -108,17 +108,43 @@ class ImportanceEngineService
         return '1/1';
     }
 
-    public function queueLimitFor(int $rolePercentage, int $shareKbps): string
+    public function queueLimitFor(int $rolePercentage, int $shareKbps, int $poolKbps = 0): string
     {
-        if ($rolePercentage <= 0) {
+        if ($rolePercentage <= 0 || $shareKbps <= 0) {
             return $this->blockedLimit();
         }
 
-        if ($shareKbps <= 0) {
-            return '0k/0k';
+        return $this->formatLimit($shareKbps);
+    }
+
+    /**
+     * A lower percentage that is still on cannot be given a larger queue than a higher percentage.
+     * Computers that are off are omitted by the caller, so their bandwidth is already back in the pool.
+     *
+     * @param  array<int|string, int>  $shares
+     * @param  array<int|string, int>  $rolePercentages
+     * @return array<int|string, int>
+     */
+    public function capSharesByRole(array $shares, array $rolePercentages): array
+    {
+        $ids = array_keys($shares);
+
+        foreach ($ids as $id) {
+            $percentage = (int) ($rolePercentages[$id] ?? 0);
+
+            foreach ($ids as $otherId) {
+                if ($id === $otherId) {
+                    continue;
+                }
+
+                $otherPercentage = (int) ($rolePercentages[$otherId] ?? 0);
+                if ($otherPercentage > $percentage && $shares[$otherId] > 0) {
+                    $shares[$id] = min($shares[$id], $shares[$otherId]);
+                }
+            }
         }
 
-        return $this->formatLimit($shareKbps);
+        return $shares;
     }
 
     /**

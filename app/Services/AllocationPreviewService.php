@@ -37,7 +37,7 @@ class AllocationPreviewService
         $entries = $this->buildEntries($monitoredUsers, $onlineIps, $activeIps);
 
         $allocatableScores = collect($entries)
-            ->filter(fn ($entry) => $entry['using_bandwidth'] && $entry['effective_score'] > 0)
+            ->filter(fn ($entry) => $entry['is_online'] && $entry['effective_score'] > 0)
             ->mapWithKeys(fn ($entry, $userId) => [$userId => $entry['effective_score']])
             ->all();
 
@@ -53,8 +53,12 @@ class AllocationPreviewService
 
         $poolUsingFallback = $measuredPoolKbps <= 0 && $poolKbps > 0;
         $distribution = $this->engine->distributePool($allocatableScores, $poolKbps);
+        $distribution = $this->engine->capSharesByRole(
+            $distribution,
+            collect($entries)->mapWithKeys(fn ($entry, $userId) => [$userId => (int) $entry['role_percentage']])->all(),
+        );
         $userThroughput ??= $this->mikrotik->measureUserThroughputKbps();
-        $rows = $this->buildRows($entries, $distribution, $totalScore, $userThroughput);
+        $rows = $this->buildRows($entries, $distribution, $totalScore, $userThroughput, $poolKbps);
         $onlineCount = collect($entries)->where('is_online', true)->count();
         $offlineCount = collect($entries)->where('is_online', false)->count();
         $totalThroughputKbps = (int) $rows->sum('throughput_total_kbps');
@@ -191,7 +195,7 @@ class AllocationPreviewService
             $usingBandwidth = $isOnline && $ip !== '' && isset($activeIps[$ip]);
             $activityStatus = $isOnline ? ($user->activity_status ?: 'unknown') : 'offline';
             $rolePercentage = $this->engine->roleScore((string) $user->role);
-            $effectiveScore = $usingBandwidth ? $rolePercentage : 0;
+            $effectiveScore = ($isOnline && $rolePercentage > 0) ? $rolePercentage : 0;
 
             $entries[$user->id] = [
                 'user' => $user,
@@ -213,7 +217,7 @@ class AllocationPreviewService
      * @param  array<int|string, int>  $distribution
      * @param  array<int, array{download_kbps: int, upload_kbps: int, total_kbps: int}>  $userThroughput
      */
-    protected function buildRows(array $entries, array $distribution, int $totalScore, array $userThroughput = []): Collection
+    protected function buildRows(array $entries, array $distribution, int $totalScore, array $userThroughput = [], int $poolKbps = 0): Collection
     {
         $rows = collect();
 
@@ -258,7 +262,7 @@ class AllocationPreviewService
                 'share_percent' => $sharePercent,
                 'share_kbps' => $shareKbps,
                 'kbps_display' => $this->engine->formatKbpsDisplay($shareKbps),
-                'bandwidth' => $this->engine->queueLimitFor((int) $entry['role_percentage'], $shareKbps),
+                'bandwidth' => $this->engine->queueLimitFor((int) $entry['role_percentage'], $shareKbps, $poolKbps),
                 'throughput_down_kbps' => $tp['download_kbps'],
                 'throughput_up_kbps' => $tp['upload_kbps'],
                 'throughput_total_kbps' => $tp['total_kbps'],

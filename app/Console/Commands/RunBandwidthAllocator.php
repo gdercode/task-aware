@@ -149,13 +149,13 @@ class RunBandwidthAllocator extends Command
             $isOnline = (bool) ($row?->is_online ?? false);
             $status = $row?->activity_status ?? 'unknown';
             $rolePercentage = (int) ($row?->role_percentage ?? $engine->roleScore((string) $user->role));
-            $limit = $engine->queueLimitFor($rolePercentage, $shareKbps);
+            $limit = $engine->queueLimitFor($rolePercentage, $shareKbps, $poolKbps);
 
             $assignments[] = [
                 'name' => $user->name,
                 'target' => $user->ip_address,
                 'max_limit' => $limit,
-                'blocked' => $rolePercentage <= 0,
+                'blocked' => $rolePercentage <= 0 || ! $isOnline,
             ];
 
             if ($rolePercentage <= 0) {
@@ -165,8 +165,8 @@ class RunBandwidthAllocator extends Command
             }
 
             if (! $isOnline || $shareKbps <= 0) {
-                $reason = ! $isOnline ? 'offline' : $status;
-                $this->line("{$user->name} → 0 Kbps ({$reason})");
+                $reason = ! $isOnline ? 'released, computer off' : $status;
+                $this->line("{$user->name} → {$limit} ({$reason})");
 
                 continue;
             }
