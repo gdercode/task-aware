@@ -195,6 +195,7 @@ class RouterDeviceDetectionService
                 'user_id' => $matched?->id,
                 'connected' => true,
                 'using_bandwidth' => $rateBps > 0,
+                'rate_kbps' => (int) ceil($rateBps / 1000),
             ];
         }
 
@@ -262,6 +263,7 @@ class RouterDeviceDetectionService
                 'user_id' => $matched?->id,
                 'connected' => false,
                 'using_bandwidth' => false,
+                'rate_kbps' => 0,
                 'last_bandwidth_at' => $row['last_bandwidth_at'] ?? null,
             ];
         }
