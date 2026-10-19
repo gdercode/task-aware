@@ -34,8 +34,11 @@ class DashboardController extends Controller
         $pcs = [];
 
         if ($live) {
+            $seen = [];
+
             foreach ($report['detection']['devices'] ?? [] as $device) {
-                if (! ($device['using_bandwidth'] ?? false)) {
+                $accessing = ($device['using_bandwidth'] ?? false) || ($device['using_internet'] ?? false);
+                if (! $accessing || ! ($device['connected'] ?? false)) {
                     continue;
                 }
 
@@ -45,9 +48,25 @@ class DashboardController extends Controller
                     $used = (int) ($row->throughput_total_kbps ?? 0);
                 }
 
+                $ip = (string) ($device['ip'] ?? '');
+                $seen[$ip] = true;
                 $pcs[] = [
-                    'name' => $device['registered_name'] ?: ($device['hostname'] ?: $device['ip']),
-                    'ip' => $device['ip'] ?? '',
+                    'name' => $device['registered_name'] ?: ($device['hostname'] ?: $ip),
+                    'ip' => $ip,
+                    'used' => $used,
+                ];
+            }
+
+            foreach ($rows as $row) {
+                $ip = (string) $row->user->ip_address;
+                $used = (int) ($row->throughput_total_kbps ?? 0);
+                if (isset($seen[$ip]) || ($used <= 0 && ! ($row->using_bandwidth ?? false))) {
+                    continue;
+                }
+
+                $pcs[] = [
+                    'name' => $row->user->name,
+                    'ip' => $ip,
                     'used' => $used,
                 ];
             }
@@ -55,10 +74,17 @@ class DashboardController extends Controller
 
         usort($pcs, fn (array $a, array $b) => [$b['used'], $a['name']] <=> [$a['used'], $b['name']]);
 
+        $totalKbps = $live ? (int) ($allocation['pool_kbps'] ?? 0) : null;
+        $scale = ($totalKbps ?? 0) > 0 ? $totalKbps : max(1, (int) collect($pcs)->max('used'));
+
+        foreach ($pcs as $index => $pc) {
+            $pcs[$index]['share'] = (int) min(100, round(($pc['used'] / $scale) * 100));
+        }
+
         return view('live-use', [
             'live' => $live,
             'updatedAt' => $report['reportUpdatedAt'],
-            'totalKbps' => $live ? (int) ($allocation['pool_kbps'] ?? 0) : null,
+            'totalKbps' => $totalKbps,
             'pcs' => $pcs,
         ]);
     }
