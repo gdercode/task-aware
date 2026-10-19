@@ -47,6 +47,8 @@ class DashboardController extends Controller
                 if ($used <= 0 && $row) {
                     $used = (int) ($row->throughput_total_kbps ?? 0);
                 }
+                $allowed = $row ? (int) ($row->share_kbps ?? 0) : null;
+                $share = $row ? (float) ($row->share_percent ?? 0) : 0.0;
 
                 $ip = (string) ($device['ip'] ?? '');
                 $seen[$ip] = true;
@@ -54,6 +56,8 @@ class DashboardController extends Controller
                     'name' => $device['registered_name'] ?: ($device['hostname'] ?: $ip),
                     'ip' => $ip,
                     'used' => $used,
+                    'allowed' => $allowed,
+                    'share' => $share,
                 ];
             }
 
@@ -68,17 +72,18 @@ class DashboardController extends Controller
                     'name' => $row->user->name,
                     'ip' => $ip,
                     'used' => $used,
+                    'allowed' => (int) ($row->share_kbps ?? 0),
+                    'share' => (float) ($row->share_percent ?? 0),
                 ];
             }
         }
 
-        usort($pcs, fn (array $a, array $b) => [$b['used'], $a['name']] <=> [$a['used'], $b['name']]);
+        usort($pcs, fn (array $a, array $b) => [$b['share'] ?? 0, $a['name']] <=> [$a['share'] ?? 0, $b['name']]);
 
         $totalKbps = $live ? (int) ($allocation['pool_kbps'] ?? 0) : null;
-        $scale = ($totalKbps ?? 0) > 0 ? $totalKbps : max(1, (int) collect($pcs)->max('used'));
 
         foreach ($pcs as $index => $pc) {
-            $pcs[$index]['share'] = (int) min(100, round(($pc['used'] / $scale) * 100));
+            $pcs[$index]['share'] = (int) round((float) ($pc['share'] ?? 0));
         }
 
         return view('live-use', [

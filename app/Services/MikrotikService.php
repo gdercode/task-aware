@@ -76,12 +76,21 @@ class MikrotikService
         return $this->getClient();
     }
 
-    public function createQueue($name, $target, $maxLimit)
+    public function createQueue($name, $target, $maxLimit, ?string $priority = null, bool $withLimitAt = true, ?string $parent = null)
     {
         $query = new Query('/queue/simple/add');
         $query->equal('name', $name);
         $query->equal('target', $target);
         $query->equal('max-limit', $maxLimit);
+        if ($withLimitAt) {
+            $query->equal('limit-at', $maxLimit);
+        }
+        if ($priority !== null && $priority !== '') {
+            $query->equal('priority', $priority);
+        }
+        if ($parent !== null && $parent !== '') {
+            $query->equal('parent', $parent);
+        }
 
         return $this->getClient()->query($query)->read();
     }
@@ -163,7 +172,7 @@ class MikrotikService
      * @param  list<array{name: string, target: string, max_limit: string}>  $assignments
      * @return array<string, bool>
      */
-    public function syncQueueLimits(array $assignments): array
+    public function syncQueueLimits(array $assignments, ?string $poolLimit = null): array
     {
         $results = [];
 
@@ -195,6 +204,14 @@ class MikrotikService
             }
         }
 
+        if ($poolLimit !== null && $poolLimit !== '' && $poolLimit !== '0k/0k') {
+            try {
+                $this->ensurePoolQueue($poolLimit, $idsByName);
+            } catch (\Throwable) {
+                $this->resetClient();
+            }
+        }
+
         $disconnected = false;
 
         foreach ($assignments as $row) {
@@ -205,26 +222,105 @@ class MikrotikService
             }
 
             try {
-                if (isset($idsByName[$row['name']])) {
-                    $query = new Query('/queue/simple/set');
-                    $query->equal('.id', $idsByName[$row['name']]);
-                    $query->equal('target', $row['target']);
-                    $query->equal('max-limit', $row['max_limit']);
-                    $query->equal('disabled', 'no');
-                    $this->getClient()->query($query)->read();
-                } else {
-                    $this->createQueue($row['name'], $row['target'], $row['max_limit']);
-                }
-
+                $this->writeQueueLimit($row, $idsByName[$row['name']] ?? null);
                 $results[$row['name']] = true;
             } catch (ConnectException $e) {
                 $this->resetClient();
                 $results[$row['name']] = false;
                 $disconnected = true;
+            } catch (\Throwable) {
+                $this->resetClient();
+                $results[$row['name']] = false;
             }
         }
 
         return $results;
+    }
+
+    /**
+     * One parent queue is the whole line. Each computer is a child, so a lower
+     * priority cannot borrow the higher priority's rate.
+     *
+     * @param  array<string, string>  $idsByName
+     */
+    protected function ensurePoolQueue(string $poolLimit, array &$idsByName): void
+    {
+        $name = 'ta-pool';
+
+        if (isset($idsByName[$name])) {
+            $query = new Query('/queue/simple/set');
+            $query->equal('.id', $idsByName[$name]);
+            $query->equal('target', '0.0.0.0/0');
+            $query->equal('max-limit', $poolLimit);
+            $query->equal('disabled', 'no');
+            $this->getClient()->query($query)->read();
+
+            return;
+        }
+
+        $query = new Query('/queue/simple/add');
+        $query->equal('name', $name);
+        $query->equal('target', '0.0.0.0/0');
+        $query->equal('max-limit', $poolLimit);
+        $query->equal('comment', 'task-aware');
+        $this->getClient()->query($query)->read();
+        $idsByName[$name] = $name;
+    }
+
+    /**
+     * @param  array{name: string, target: string, max_limit: string, priority?: string}  $row
+     */
+    protected function writeQueueLimit(array $row, ?string $queueId): void
+    {
+        $attempts = [
+            ['limit_at' => true, 'priority' => true, 'parent' => true],
+            ['limit_at' => true, 'priority' => false, 'parent' => false],
+            ['limit_at' => false, 'priority' => false, 'parent' => false],
+        ];
+
+        $lastError = null;
+
+        foreach ($attempts as $attempt) {
+            try {
+                if ($queueId) {
+                    $query = new Query('/queue/simple/set');
+                    $query->equal('.id', $queueId);
+                    $query->equal('target', $row['target']);
+                    $query->equal('max-limit', $row['max_limit']);
+                    if ($attempt['limit_at']) {
+                        $query->equal('limit-at', $row['max_limit']);
+                    }
+                    if ($attempt['priority'] && ! empty($row['priority'])) {
+                        $query->equal('priority', (string) $row['priority']);
+                    }
+                    if ($attempt['parent'] && ! empty($row['parent'])) {
+                        $query->equal('parent', (string) $row['parent']);
+                    }
+                    $query->equal('disabled', 'no');
+                    $this->getClient()->query($query)->read();
+                } else {
+                    $this->createQueue(
+                        $row['name'],
+                        $row['target'],
+                        $row['max_limit'],
+                        $attempt['priority'] && ! empty($row['priority']) ? (string) $row['priority'] : null,
+                        $attempt['limit_at'],
+                        $attempt['parent'] && ! empty($row['parent']) ? (string) $row['parent'] : null,
+                    );
+                }
+
+                return;
+            } catch (ConnectException $e) {
+                throw $e;
+            } catch (\Throwable $e) {
+                $lastError = $e;
+                $this->resetClient();
+            }
+        }
+
+        if ($lastError) {
+            throw $lastError;
+        }
     }
 
     /**
@@ -236,7 +332,7 @@ class MikrotikService
      * @param  list<array<string, mixed>>  $connections
      * @return array{queues: array<string, bool>, error: ?string}
      */
-    public function applyAccessControl(array $assignments, array $connections, bool $updateAllQueues = true): array
+    public function applyAccessControl(array $assignments, array $connections, bool $updateAllQueues = true, ?string $poolLimit = null): array
     {
         $blockedIps = [];
         $controlledIps = [];
@@ -251,6 +347,8 @@ class MikrotikService
             $controlledIps[$ip] = true;
             if (! empty($row['blocked'])) {
                 $blockedIps[$ip] = true;
+            } elseif ($updateAllQueues && $poolLimit) {
+                $assignments[$index]['parent'] = 'ta-pool';
             }
         }
 
@@ -273,10 +371,61 @@ class MikrotikService
             ? $assignments
             : array_values(array_filter($assignments, fn (array $row) => ! empty($row['blocked'])));
 
+        $queues = $this->syncQueueLimits($queueRows, $updateAllQueues ? $poolLimit : null);
+        $this->breakExistingFasttrack($queueRows, $queues, $connections);
+
         return [
-            'queues' => $this->syncQueueLimits($queueRows),
+            'queues' => $queues,
             'error' => null,
         ];
+    }
+
+    /**
+     * FastTrack ignores simple queues until the open connection is cleared.
+     * Clear each shaped computer once, when its limit is first applied.
+     *
+     * @param  list<array{name: string, target: string, max_limit: string, blocked?: bool}>  $assignments
+     * @param  array<string, bool>  $queues
+     * @param  list<array<string, mixed>>  $connections
+     */
+    protected function breakExistingFasttrack(array $assignments, array $queues, array $connections): void
+    {
+        $shaped = Cache::store('file')->get('bandwidth.shaped_ips', []);
+        if (! is_array($shaped)) {
+            $shaped = [];
+        }
+
+        $reset = [];
+
+        foreach ($assignments as $row) {
+            if (! ($queues[$row['name']] ?? false)) {
+                continue;
+            }
+
+            $ip = $this->hostFromTarget($row['target'] ?? null);
+            if ($ip === '') {
+                continue;
+            }
+
+            $holdingLimit = empty($row['blocked']) && ($row['max_limit'] ?? '') !== '1/1';
+            if (! $holdingLimit) {
+                unset($shaped[$ip]);
+
+                continue;
+            }
+
+            if (! isset($shaped[$ip]) || ! empty($row['force_reset'])) {
+                $reset[$ip] = true;
+            }
+
+            $shaped[$ip] = true;
+        }
+
+        Cache::store('file')->forever('bandwidth.shaped_ips', $shaped);
+
+        if ($reset !== []) {
+            $this->removeConnectionsFor($reset, $connections);
+        }
     }
 
     /**
@@ -383,6 +532,26 @@ class MikrotikService
             $query->equal('src-address-list', 'ta-controlled');
             $query->equal('connection-mark', 'no-mark');
             $query->equal('comment', 'task-aware-mark');
+            $this->getClient()->query($query)->read();
+        }
+
+        $markedReturn = false;
+        foreach ($mangle as $rule) {
+            if (($rule['comment'] ?? '') === 'task-aware-mark-dst') {
+                $markedReturn = true;
+                break;
+            }
+        }
+
+        if (! $markedReturn) {
+            $query = new Query('/ip/firewall/mangle/add');
+            $query->equal('chain', 'prerouting');
+            $query->equal('action', 'mark-connection');
+            $query->equal('new-connection-mark', 'ta-client');
+            $query->equal('passthrough', 'yes');
+            $query->equal('dst-address-list', 'ta-controlled');
+            $query->equal('connection-mark', 'no-mark');
+            $query->equal('comment', 'task-aware-mark-dst');
             $this->getClient()->query($query)->read();
         }
 

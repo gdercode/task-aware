@@ -26,7 +26,8 @@
                 'label' => $device['registered_name'] ?: ($device['hostname'] ?: $device['ip']),
                 'address' => $device['ip'] ?? '',
                 'used' => $used,
-                'allocated' => (int) ($row->share_kbps ?? 0),
+                'allocated' => $row ? (int) $row->share_kbps : 0,
+                'share' => $row ? (float) $row->share_percent : 0.0,
             ];
         }
 
@@ -45,16 +46,17 @@
                 'address' => $row->user->ip_address,
                 'used' => $used,
                 'allocated' => (int) ($row->share_kbps ?? 0),
+                'share' => (float) ($row->share_percent ?? 0),
             ];
         }
     }
 
     usort($points, function (array $a, array $b) {
-        return [$b['used'], $a['label']] <=> [$a['used'], $b['label']];
+        return [$b['share'], $b['allocated'], $a['label']] <=> [$a['share'], $a['allocated'], $b['label']];
     });
 
     $totalUsed = array_sum(array_column($points, 'used'));
-    $busiest = $points === [] ? 0 : max(array_column($points, 'used'));
+    $widest = $points === [] ? 0 : max(array_column($points, 'share'));
 @endphp
 
 <div class="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden">
@@ -88,7 +90,7 @@
         <ul class="divide-y divide-slate-800">
             @foreach ($points as $point)
                 @php
-                    $width = $busiest > 0 ? (int) round(($point['used'] / $busiest) * 100) : 0;
+                    $width = $widest > 0 ? (int) round(($point['share'] / $widest) * 100) : 0;
                 @endphp
                 <li class="px-5 py-4">
                     <div class="flex items-baseline justify-between gap-4">
@@ -98,7 +100,10 @@
                                 <span class="block text-xs font-normal font-mono text-slate-500">{{ $point['address'] }}</span>
                             @endif
                         </p>
-                        <p class="font-mono text-lg text-sky-300">{{ number_format($point['used']) }} <span class="text-sm text-slate-500">Kbps</span></p>
+                        <p class="text-right">
+                            <span class="font-mono text-lg text-sky-300">{{ (int) round($point['share']) }}%</span>
+                            <span class="block text-xs font-mono text-slate-500">using {{ number_format($point['used']) }} Kbps</span>
+                        </p>
                     </div>
                     <div class="mt-2 flex items-center gap-3">
                         <div class="h-2.5 flex-1 rounded-full bg-slate-800 overflow-hidden">

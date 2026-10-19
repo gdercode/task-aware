@@ -13,6 +13,7 @@ use App\Services\RouterDeviceDetectionService;
 use App\Services\TrafficDetectionService;
 use App\Services\TrafficSyncService;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Cache;
 
 class RunBandwidthAllocator extends Command
 {
@@ -119,6 +120,12 @@ class RunBandwidthAllocator extends Command
         }
 
         $poolMeasure = $mikrotik->poolFromMeasurements($interfaceKbps, $interfaceError, $connections);
+        $peakKbps = (int) Cache::store('file')->get('bandwidth.pool_peak_kbps', 0);
+        if ($poolMeasure['kbps'] > $peakKbps) {
+            $peakKbps = $poolMeasure['kbps'];
+            Cache::store('file')->put('bandwidth.pool_peak_kbps', $peakKbps, now()->addHours(6));
+        }
+        $poolMeasure['kbps'] = max($poolMeasure['kbps'], $peakKbps);
         $interfaceTraffic = $mikrotik->interfaceTrafficSnapshot($monitor, $interfaceError ? null : $interfaceKbps);
         $throughput = $mikrotik->measureUserThroughputKbps($connections);
         $allocation = $allocationPreview->build($poolMeasure['kbps'], $onlineIps, $throughput, $activeIps);
@@ -126,7 +133,7 @@ class RunBandwidthAllocator extends Command
         foreach ($detection['devices'] ?? [] as $index => $device) {
             $row = isset($device['user_id']) ? $sharesByUser->get($device['user_id']) : null;
             $detection['devices'][$index]['role_percentage'] = $row->role_percentage ?? null;
-            $detection['devices'][$index]['share_percent'] = ($device['using_bandwidth'] ?? false)
+            $detection['devices'][$index]['share_percent'] = ($row && ($row->is_online ?? false))
                 ? (float) ($row->share_percent ?? 0)
                 : 0;
         }
@@ -140,22 +147,31 @@ class RunBandwidthAllocator extends Command
 
         $availableBandwidth = $poolKbps > 0 ? $engine->formatLimit($poolKbps) : '0k/0k';
         $rowsByUser = $allocation['users']->keyBy(fn ($row) => $row->user->id);
+        $monitoredUsers = User::whereNotNull('ip_address')->get();
+        $queuePriority = $engine->queuePriorities(
+            $monitoredUsers->mapWithKeys(fn (User $user) => [
+                $user->id => (int) ($rowsByUser->get($user->id)?->role_percentage ?? $engine->roleScore((string) $user->role)),
+            ])->all()
+        );
         $assignments = [];
         $pendingLogs = [];
 
-        foreach (User::whereNotNull('ip_address')->get() as $user) {
+        foreach ($monitoredUsers as $user) {
             $row = $rowsByUser->get($user->id);
             $shareKbps = (int) ($row?->share_kbps ?? 0);
             $isOnline = (bool) ($row?->is_online ?? false);
             $status = $row?->activity_status ?? 'unknown';
             $rolePercentage = (int) ($row?->role_percentage ?? $engine->roleScore((string) $user->role));
             $limit = $engine->queueLimitFor($rolePercentage, $shareKbps, $poolKbps);
+            $priority = $queuePriority[$user->id] ?? 8;
 
             $assignments[] = [
                 'name' => $user->name,
                 'target' => $user->ip_address,
                 'max_limit' => $limit,
+                'priority' => (string) $priority,
                 'blocked' => $rolePercentage <= 0 || ! $isOnline,
+                'force_reset' => (bool) ($row?->force_reset ?? false),
             ];
 
             if ($rolePercentage <= 0) {
@@ -185,7 +201,7 @@ class RunBandwidthAllocator extends Command
         }
 
         if ($poolKbps <= 0) {
-            $enforcement = $mikrotik->applyAccessControl($assignments, $connections, false);
+            $enforcement = $mikrotik->applyAccessControl($assignments, $connections, false, null);
             if ($enforcement['error']) {
                 $this->warn('Router did not block 0% devices: '.$enforcement['error']);
             }
@@ -196,7 +212,7 @@ class RunBandwidthAllocator extends Command
             return;
         }
 
-        $enforcement = $mikrotik->applyAccessControl($assignments, $connections, true);
+        $enforcement = $mikrotik->applyAccessControl($assignments, $connections, true, $availableBandwidth);
         if ($enforcement['error']) {
             $this->warn('Router did not apply bandwidth control: '.$enforcement['error']);
         }

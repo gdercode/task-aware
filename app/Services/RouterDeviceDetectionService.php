@@ -56,14 +56,37 @@ class RouterDeviceDetectionService
         $devices = $this->devicesOnRouter($sources);
         $onlineIps = [];
         $ipSources = [];
+        $stillOnUntil = now()->subMinutes(2);
 
         foreach ($devices as $device) {
-            if (! ($device['connected'] ?? false)) {
+            $ip = (string) ($device['ip'] ?? '');
+            if ($ip === '') {
                 continue;
             }
 
-            $onlineIps[$device['ip']] = true;
-            $ipSources[$device['ip']] = $device['via'];
+            $seenAt = $device['last_seen_on_lan_at'] ?? null;
+            $seenRecently = $seenAt !== null && \Carbon\Carbon::parse($seenAt)->gte($stillOnUntil);
+            $onNetwork = ($device['connected'] ?? false)
+                || ($device['using_internet'] ?? false)
+                || ($device['using_bandwidth'] ?? false)
+                || $seenRecently;
+
+            if (! $onNetwork) {
+                continue;
+            }
+
+            $onlineIps[$ip] = true;
+            $ipSources[$ip] = $device['via'] ?? [];
+        }
+
+        foreach ($sources['connections']['details'] ?? [] as $ip => $detail) {
+            if (! is_string($ip) || ! $this->isLanClientIp($ip)) {
+                continue;
+            }
+
+            if ((int) ($detail['rate_bps'] ?? 0) > 0) {
+                $onlineIps[$ip] = true;
+            }
         }
 
         $users = User::whereNotNull('ip_address')->orderBy('name')->get()->map(function (User $user) use ($onlineIps, $ipSources) {
@@ -226,6 +249,7 @@ class RouterDeviceDetectionService
                 : $previousBandwidthAt;
 
             $devices[$index]['last_bandwidth_at'] = $lastBandwidthAt;
+            $devices[$index]['last_seen_on_lan_at'] = $seenOnLanAt;
             $memory[$device['ip']] = [
                 'ip' => $device['ip'],
                 'mac' => $device['mac'],
@@ -264,6 +288,7 @@ class RouterDeviceDetectionService
                 'connected' => false,
                 'using_bandwidth' => false,
                 'rate_kbps' => 0,
+                'last_seen_on_lan_at' => $seenAt,
                 'last_bandwidth_at' => $row['last_bandwidth_at'] ?? null,
             ];
         }

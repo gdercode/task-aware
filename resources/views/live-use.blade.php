@@ -35,8 +35,8 @@
             <div class="px-5 py-4 border-b border-slate-800">
                 <h2 class="text-lg font-semibold text-white">Who is using it</h2>
                 <p class="text-sm text-slate-400 mt-1">
-                    {{ count($pcs) }} {{ count($pcs) === 1 ? 'PC' : 'PCs' }} accessing the internet.
-                    Each bar is that PC’s share of the total.
+                    {{ count($pcs) }} {{ count($pcs) === 1 ? 'PC' : 'PCs' }} on the line.
+                    The percent is the share that priority allows. A lower priority cannot be given a larger share.
                 </p>
             </div>
 
@@ -70,9 +70,9 @@
                                 $center = $x + ($barWidth / 2);
                             @endphp
                             <rect x="{{ $x }}" y="{{ $y }}" width="{{ $barWidth }}" height="{{ max($barHeight, 0) }}" rx="6" fill="#38bdf8"></rect>
-                            <text x="{{ $center }}" y="{{ max(16, $y - 8) }}" text-anchor="middle" fill="#e2e8f0" font-size="13" font-family="ui-sans-serif, system-ui, sans-serif" font-weight="600">{{ number_format($pc['used']) }}</text>
+                            <text x="{{ $center }}" y="{{ max(16, $y - 8) }}" text-anchor="middle" fill="#e2e8f0" font-size="13" font-family="ui-sans-serif, system-ui, sans-serif" font-weight="600">{{ $pc['share'] }}%</text>
                             <text x="{{ $center }}" y="{{ $plotTop + $plotHeight + 22 }}" text-anchor="middle" fill="#e2e8f0" font-size="13" font-family="ui-sans-serif, system-ui, sans-serif">{{ \Illuminate\Support\Str::limit($pc['name'], 14) }}</text>
-                            <text x="{{ $center }}" y="{{ $plotTop + $plotHeight + 40 }}" text-anchor="middle" fill="#94a3b8" font-size="12" font-family="ui-monospace, monospace">{{ $totalKbps > 0 ? $pc['share'].'% of total' : 'Kbps' }}</text>
+                            <text x="{{ $center }}" y="{{ $plotTop + $plotHeight + 40 }}" text-anchor="middle" fill="#94a3b8" font-size="12" font-family="ui-monospace, monospace">{{ $pc['share'] }}% share</text>
                         @endforeach
                     </svg>
                 </div>
@@ -86,11 +86,17 @@
                                         <span class="block text-xs font-normal font-mono text-slate-500 mt-0.5">{{ $pc['ip'] }}</span>
                                     @endif
                                 </p>
-                                <p class="font-mono text-lg text-sky-300">{{ number_format($pc['used']) }} <span class="text-sm text-slate-500">Kbps</span></p>
+                                <p class="text-right">
+                                    <span class="font-mono text-lg text-sky-300">{{ $pc['share'] }}%</span>
+                                    <span class="block text-xs font-mono text-slate-500">using {{ number_format($pc['used']) }} Kbps</span>
+                                    @if (($pc['allowed'] ?? null) !== null)
+                                        <span class="block text-xs font-mono text-slate-500">allowed {{ number_format($pc['allowed']) }} Kbps</span>
+                                    @endif
+                                </p>
                             </div>
                             <div class="mt-2 flex items-center gap-3">
-                                <div class="h-3 flex-1 rounded-full bg-slate-800 overflow-hidden" role="img" aria-label="{{ $pc['name'] }} is using {{ $pc['share'] }} percent of the total">
-                                    <div class="h-full rounded-full bg-sky-400" style="width: {{ max($pc['share'], $pc['used'] > 0 ? 2 : 0) }}%"></div>
+                                <div class="h-3 flex-1 rounded-full bg-slate-800 overflow-hidden" role="img" aria-label="{{ $pc['name'] }} is allowed {{ $pc['share'] }} percent">
+                                    <div class="h-full rounded-full bg-sky-400" style="width: {{ max($pc['share'], 0) }}%"></div>
                                 </div>
                                 <p class="w-12 shrink-0 text-right font-mono text-sm text-slate-300">{{ $pc['share'] }}%</p>
                             </div>

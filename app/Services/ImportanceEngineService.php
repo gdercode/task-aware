@@ -118,8 +118,8 @@ class ImportanceEngineService
     }
 
     /**
-     * A lower percentage that is still on cannot be given a larger queue than a higher percentage.
-     * Computers that are off are omitted by the caller, so their bandwidth is already back in the pool.
+     * Higher priorities keep a strictly larger queue than lower priorities.
+     * Computers with the same percentage can receive the same amount.
      *
      * @param  array<int|string, int>  $shares
      * @param  array<int|string, int>  $rolePercentages
@@ -127,24 +127,110 @@ class ImportanceEngineService
      */
     public function capSharesByRole(array $shares, array $rolePercentages): array
     {
-        $ids = array_keys($shares);
+        $grouped = [];
 
-        foreach ($ids as $id) {
-            $percentage = (int) ($rolePercentages[$id] ?? 0);
+        foreach ($shares as $id => $kbps) {
+            $grouped[(int) ($rolePercentages[$id] ?? 0)][$id] = (int) $kbps;
+        }
 
-            foreach ($ids as $otherId) {
-                if ($id === $otherId) {
-                    continue;
+        krsort($grouped);
+
+        $result = [];
+        $lowerMustStayBelow = null;
+
+        foreach ($grouped as $members) {
+            $groupShares = [];
+
+            foreach ($members as $id => $kbps) {
+                if ($lowerMustStayBelow !== null) {
+                    $kbps = min($kbps, max(0, $lowerMustStayBelow - 1));
                 }
 
-                $otherPercentage = (int) ($rolePercentages[$otherId] ?? 0);
-                if ($otherPercentage > $percentage && $shares[$otherId] > 0) {
-                    $shares[$id] = min($shares[$id], $shares[$otherId]);
-                }
+                $groupShares[$id] = $kbps;
+                $result[$id] = $kbps;
+            }
+
+            if ($groupShares !== []) {
+                $lowerMustStayBelow = min($groupShares);
             }
         }
 
+        return $result;
+    }
+
+    /**
+     * While a higher priority is moving traffic, a lower priority cannot be given a larger rate.
+     *
+     * @param  array<int|string, int>  $shares
+     * @param  array<int|string, int>  $rolePercentages
+     * @param  array<int|string, int>  $usedKbps
+     * @return array<int|string, int>
+     */
+    public function holdBelowActiveHigherPriority(array $shares, array $rolePercentages, array $usedKbps): array
+    {
+        $activeUse = [];
+
+        foreach ($shares as $id => $kbps) {
+            $used = (int) ($usedKbps[$id] ?? 0);
+            if ($used < 1) {
+                continue;
+            }
+
+            $percentage = (int) ($rolePercentages[$id] ?? 0);
+            $activeUse[$percentage] = isset($activeUse[$percentage])
+                ? min($activeUse[$percentage], $used)
+                : $used;
+        }
+
+        if ($activeUse === []) {
+            return $shares;
+        }
+
+        foreach ($shares as $id => $kbps) {
+            $percentage = (int) ($rolePercentages[$id] ?? 0);
+            $ceiling = null;
+
+            foreach ($activeUse as $higherPercentage => $used) {
+                if ($higherPercentage <= $percentage) {
+                    continue;
+                }
+
+                $ceiling = $ceiling === null ? $used : min($ceiling, $used);
+            }
+
+            if ($ceiling === null) {
+                continue;
+            }
+
+            $shares[$id] = min((int) $kbps, max(1, $ceiling - 1));
+        }
+
         return $shares;
+    }
+
+    /**
+     * RouterOS priority 1 is served first. Higher role percentages get the smaller number.
+     *
+     * @param  array<int|string, int>  $rolePercentages
+     * @return array<int|string, int>
+     */
+    public function queuePriorities(array $rolePercentages): array
+    {
+        $levels = array_values(array_unique(array_map('intval', $rolePercentages)));
+        rsort($levels);
+        $rank = [];
+
+        foreach ($levels as $index => $percentage) {
+            $rank[$percentage] = min(8, $index + 1);
+        }
+
+        $priorities = [];
+
+        foreach ($rolePercentages as $id => $percentage) {
+            $priorities[$id] = $rank[(int) $percentage] ?? 8;
+        }
+
+        return $priorities;
     }
 
     /**
