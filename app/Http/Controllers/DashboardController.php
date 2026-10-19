@@ -24,6 +24,45 @@ class DashboardController extends Controller
         return view('dashboard', $snapshot->forDashboard());
     }
 
+    public function liveUse(AllocationSnapshotService $snapshot): View
+    {
+        $report = $snapshot->forDashboard();
+        $live = ($report['reportState'] ?? '') === 'live';
+        $allocation = $report['allocation'];
+        $rows = collect($allocation['users'] ?? []);
+        $byUser = $rows->keyBy(fn ($row) => $row->user->id);
+        $pcs = [];
+
+        if ($live) {
+            foreach ($report['detection']['devices'] ?? [] as $device) {
+                if (! ($device['using_bandwidth'] ?? false)) {
+                    continue;
+                }
+
+                $row = isset($device['user_id']) ? $byUser->get($device['user_id']) : null;
+                $used = (int) ($device['rate_kbps'] ?? 0);
+                if ($used <= 0 && $row) {
+                    $used = (int) ($row->throughput_total_kbps ?? 0);
+                }
+
+                $pcs[] = [
+                    'name' => $device['registered_name'] ?: ($device['hostname'] ?: $device['ip']),
+                    'ip' => $device['ip'] ?? '',
+                    'used' => $used,
+                ];
+            }
+        }
+
+        usort($pcs, fn (array $a, array $b) => [$b['used'], $a['name']] <=> [$a['used'], $b['name']]);
+
+        return view('live-use', [
+            'live' => $live,
+            'updatedAt' => $report['reportUpdatedAt'],
+            'totalKbps' => $live ? (int) ($allocation['pool_kbps'] ?? 0) : null,
+            'pcs' => $pcs,
+        ]);
+    }
+
     public function updateMikrotik(Request $request, MikrotikService $mikrotik): RedirectResponse
     {
         $validated = $request->validate([
