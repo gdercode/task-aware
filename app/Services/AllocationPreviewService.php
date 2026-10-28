@@ -77,7 +77,18 @@ class AllocationPreviewService
             ];
         }
         $rawShares = $this->engine->distributePool($allocatableScores, $poolKbps);
+        $usedKbps = [];
+        foreach ($entries as $userId => $entry) {
+            $usedKbps[$userId] = (int) ($userThroughput[$userId]['total_kbps'] ?? 0);
+        }
         $distribution = $this->engine->shapeShares($allocatableScores, $context, $poolKbps, $congestion['congested']);
+        $distribution = $this->engine->releaseUnused(
+            $distribution,
+            $usedKbps,
+            $allocatableScores,
+            $context,
+            $congestion['congested'],
+        );
         $pulledBack = [];
         foreach ($rawShares as $userId => $kbps) {
             if (($distribution[$userId] ?? 0) < $kbps) {

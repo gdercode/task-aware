@@ -64,6 +64,33 @@ class TaskAwareAllocationTest extends TestCase
         $this->assertSame(10000, $this->share($busy, $student) + $this->share($busy, $dean));
     }
 
+    public function test_unused_share_moves_to_the_device_filling_its_queue(): void
+    {
+        $dean = $this->makeUser('dean', '10.0.0.20', 'REAL_TIME');
+        $lecturer = $this->makeUser('lecturer', '10.0.0.21', 'LEARNING');
+        $pool = 41102;
+
+        $allocation = app(AllocationPreviewService::class)->build($pool, [
+            $dean->ip_address => true,
+            $lecturer->ip_address => true,
+        ], [
+            $dean->id => ['download_kbps' => 1500, 'upload_kbps' => 0, 'total_kbps' => 1500],
+            $lecturer->id => ['download_kbps' => 16202, 'upload_kbps' => 0, 'total_kbps' => 16202],
+        ], [
+            $dean->ip_address => true,
+            $lecturer->ip_address => true,
+        ]);
+
+        $deanShare = $this->share($allocation, $dean);
+        $lecturerShare = $this->share($allocation, $lecturer);
+
+        $this->assertFalse($allocation['congested']);
+        $this->assertGreaterThan($deanShare, $lecturerShare);
+        $this->assertGreaterThan(1500, $deanShare);
+        $this->assertGreaterThan(16202, $lecturerShare);
+        $this->assertSame($pool, $deanShare + $lecturerShare);
+    }
+
     public function test_same_task_still_favors_higher_institutional_role(): void
     {
         [$student, $dean] = $this->pair('REAL_TIME', 'REAL_TIME');

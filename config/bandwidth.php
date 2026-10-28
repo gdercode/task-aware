@@ -72,4 +72,24 @@ return [
 
     'streaming_cap_percent' => (int) env('BANDWIDTH_STREAMING_CAP_PERCENT', 20),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Unused allocation
+    |--------------------------------------------------------------------------
+    |
+    | A device using less than spare_use_ratio of its queue gives the unused
+    | part to a device that has filled tight_use_ratio of its queue. The donor
+    | keeps twice its live use, or spare_keep_score_ratio of its score share,
+    | whichever is larger, so a higher priority device can still grow.
+    |
+    */
+
+    'spare_use_ratio' => (float) env('BANDWIDTH_SPARE_USE_RATIO', 0.5),
+
+    'tight_use_ratio' => (float) env('BANDWIDTH_TIGHT_USE_RATIO', 0.8),
+
+    'spare_keep_multiple' => (float) env('BANDWIDTH_SPARE_KEEP_MULTIPLE', 2),
+
+    'spare_keep_score_ratio' => (float) env('BANDWIDTH_SPARE_KEEP_SCORE_RATIO', 0.25),
+
 ];

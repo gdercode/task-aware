@@ -243,6 +243,68 @@ class ImportanceEngineService
     }
 
     /**
+     * Move bandwidth a device is not using to a device that has filled its queue.
+     * The donor keeps headroom so a higher-priority device can grow on the next cycles.
+     *
+     * @param  array<int|string, int>  $shares
+     * @param  array<int|string, int>  $usedKbps
+     * @param  array<int|string, int>  $scores
+     * @param  array<int|string, array{task?: string}>  $context
+     * @return array<int|string, int>
+     */
+    public function releaseUnused(array $shares, array $usedKbps, array $scores, array $context = [], bool $congested = false): array
+    {
+        $spareRatio = (float) config('bandwidth.spare_use_ratio', 0.5);
+        $tightRatio = (float) config('bandwidth.tight_use_ratio', 0.8);
+        $keepMultiple = (float) config('bandwidth.spare_keep_multiple', 2);
+        $keepScoreRatio = (float) config('bandwidth.spare_keep_score_ratio', 0.25);
+
+        $give = [];
+        $recipients = [];
+
+        foreach ($shares as $id => $share) {
+            $share = (int) $share;
+            if ($share <= 0) {
+                continue;
+            }
+
+            $used = max(0, (int) ($usedKbps[$id] ?? 0));
+            $ratio = $used / $share;
+            $task = (string) ($context[$id]['task'] ?? 'NORMAL');
+
+            if ($ratio >= $tightRatio && (! $congested || ! in_array($task, ['BULK', 'STREAMING'], true))) {
+                $recipients[$id] = max(1, (int) ($scores[$id] ?? 1));
+
+                continue;
+            }
+
+            if ($ratio >= $spareRatio) {
+                continue;
+            }
+
+            $keep = (int) round(max($used * $keepMultiple, $share * $keepScoreRatio));
+            $keep = min($share, max($keep, $used));
+            if ($share > $keep) {
+                $give[$id] = $share - $keep;
+            }
+        }
+
+        if ($give === [] || $recipients === []) {
+            return $shares;
+        }
+
+        foreach ($give as $id => $kbps) {
+            $shares[$id] -= $kbps;
+        }
+
+        foreach ($this->distributePool($recipients, (int) array_sum($give)) as $id => $extra) {
+            $shares[$id] = ($shares[$id] ?? 0) + $extra;
+        }
+
+        return $shares;
+    }
+
+    /**
      * @param  array<int|string, int>  $shares
      * @param  list<int|string>  $protectIds
      * @return array<int|string, int>
