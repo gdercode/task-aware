@@ -90,6 +90,8 @@ return [
 
     'spare_keep_multiple' => (float) env('BANDWIDTH_SPARE_KEEP_MULTIPLE', 2),
 
-    'spare_keep_score_ratio' => (float) env('BANDWIDTH_SPARE_KEEP_SCORE_RATIO', 0.25),
+    'spare_idle_kbps' => (int) env('BANDWIDTH_SPARE_IDLE_KBPS', 256),
+
+    'rebalance_seconds' => (int) env('BANDWIDTH_REBALANCE_SECONDS', 45),
 
 ];

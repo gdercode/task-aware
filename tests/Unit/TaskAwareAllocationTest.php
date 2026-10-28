@@ -64,7 +64,7 @@ class TaskAwareAllocationTest extends TestCase
         $this->assertSame(10000, $this->share($busy, $student) + $this->share($busy, $dean));
     }
 
-    public function test_unused_share_moves_to_the_device_filling_its_queue(): void
+    public function test_active_downloads_keep_enough_queue_to_reach_their_share(): void
     {
         $dean = $this->makeUser('dean', '10.0.0.20', 'REAL_TIME');
         $lecturer = $this->makeUser('lecturer', '10.0.0.21', 'LEARNING');
@@ -81,14 +81,9 @@ class TaskAwareAllocationTest extends TestCase
             $lecturer->ip_address => true,
         ]);
 
-        $deanShare = $this->share($allocation, $dean);
-        $lecturerShare = $this->share($allocation, $lecturer);
-
-        $this->assertFalse($allocation['congested']);
-        $this->assertGreaterThan($deanShare, $lecturerShare);
-        $this->assertGreaterThan(1500, $deanShare);
-        $this->assertGreaterThan(16202, $lecturerShare);
-        $this->assertSame($pool, $deanShare + $lecturerShare);
+        $this->assertGreaterThan($this->share($allocation, $lecturer), $this->share($allocation, $dean));
+        $this->assertGreaterThan(1500, $this->share($allocation, $dean));
+        $this->assertGreaterThan(16202, $this->share($allocation, $lecturer));
     }
 
     public function test_same_task_still_favors_higher_institutional_role(): void
@@ -132,6 +127,14 @@ class TaskAwareAllocationTest extends TestCase
         $this->assertSame('STREAMING', $detector->classify('youtube.com:443'));
         $this->assertSame('DATA_TRANSFER', $detector->classify('files.example.edu:443', 1000, true));
         $this->assertSame('BULK', $detector->classify('files.example.edu:443', 60_000_000));
+    }
+
+    public function test_pool_uses_the_heavier_direction_only(): void
+    {
+        $mikrotik = app(\App\Services\MikrotikService::class);
+
+        $this->assertSame(18_000, $mikrotik->directionalKbps(18_000_000, 1_500_000));
+        $this->assertSame(18_000, $mikrotik->directionalKbps(1_500_000, 18_000_000));
     }
 
     public function test_dashboard_and_roles_pages_render(): void

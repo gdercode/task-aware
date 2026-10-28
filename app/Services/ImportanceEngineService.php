@@ -271,9 +271,12 @@ class ImportanceEngineService
             $used = max(0, (int) ($usedKbps[$id] ?? 0));
             $ratio = $used / $share;
             $task = (string) ($context[$id]['task'] ?? 'NORMAL');
+            $idleKbps = (int) config('bandwidth.spare_idle_kbps', 256);
 
-            if ($ratio >= $tightRatio && (! $congested || ! in_array($task, ['BULK', 'STREAMING'], true))) {
-                $recipients[$id] = max(1, (int) ($scores[$id] ?? 1));
+            if ($used > $idleKbps) {
+                if ($ratio >= $tightRatio && (! $congested || ! in_array($task, ['BULK', 'STREAMING'], true))) {
+                    $recipients[$id] = max(1, (int) ($scores[$id] ?? 1));
+                }
 
                 continue;
             }

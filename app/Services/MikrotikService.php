@@ -76,7 +76,7 @@ class MikrotikService
         return $this->getClient();
     }
 
-    public function createQueue($name, $target, $maxLimit, ?string $priority = null, bool $withLimitAt = true, ?string $parent = null)
+    public function createQueue($name, $target, $maxLimit, ?string $priority = null, bool $withLimitAt = true, ?string $parent = null, bool $withQueueType = false)
     {
         $query = new Query('/queue/simple/add');
         $query->equal('name', $name);
@@ -84,6 +84,9 @@ class MikrotikService
         $query->equal('max-limit', $maxLimit);
         if ($withLimitAt) {
             $query->equal('limit-at', $maxLimit);
+        }
+        if ($withQueueType) {
+            $query->equal('queue', 'default/default');
         }
         if ($priority !== null && $priority !== '') {
             $query->equal('priority', $priority);
@@ -252,6 +255,7 @@ class MikrotikService
             $query->equal('.id', $idsByName[$name]);
             $query->equal('target', '0.0.0.0/0');
             $query->equal('max-limit', $poolLimit);
+            $query->equal('queue', 'default/default');
             $query->equal('disabled', 'no');
             $this->getClient()->query($query)->read();
 
@@ -262,6 +266,7 @@ class MikrotikService
         $query->equal('name', $name);
         $query->equal('target', '0.0.0.0/0');
         $query->equal('max-limit', $poolLimit);
+        $query->equal('queue', 'default/default');
         $query->equal('comment', 'task-aware');
         $this->getClient()->query($query)->read();
         $idsByName[$name] = $name;
@@ -273,9 +278,10 @@ class MikrotikService
     protected function writeQueueLimit(array $row, ?string $queueId): void
     {
         $attempts = [
-            ['limit_at' => true, 'priority' => true, 'parent' => true],
-            ['limit_at' => true, 'priority' => false, 'parent' => false],
-            ['limit_at' => false, 'priority' => false, 'parent' => false],
+            ['limit_at' => true, 'priority' => true, 'parent' => true, 'queue' => true],
+            ['limit_at' => true, 'priority' => true, 'parent' => true, 'queue' => false],
+            ['limit_at' => true, 'priority' => false, 'parent' => false, 'queue' => false],
+            ['limit_at' => false, 'priority' => false, 'parent' => false, 'queue' => false],
         ];
 
         $lastError = null;
@@ -296,6 +302,9 @@ class MikrotikService
                     if ($attempt['parent'] && ! empty($row['parent'])) {
                         $query->equal('parent', (string) $row['parent']);
                     }
+                    if (! empty($attempt['queue'])) {
+                        $query->equal('queue', 'default/default');
+                    }
                     $query->equal('disabled', 'no');
                     $this->getClient()->query($query)->read();
                 } else {
@@ -306,6 +315,7 @@ class MikrotikService
                         $attempt['priority'] && ! empty($row['priority']) ? (string) $row['priority'] : null,
                         $attempt['limit_at'],
                         $attempt['parent'] && ! empty($row['parent']) ? (string) $row['parent'] : null,
+                        ! empty($attempt['queue']),
                     );
                 }
 
@@ -414,8 +424,15 @@ class MikrotikService
                 continue;
             }
 
-            if (! isset($shaped[$ip]) || ! empty($row['force_reset'])) {
+            $needsReset = ! isset($shaped[$ip]) || ! empty($row['force_reset']);
+            if ($needsReset && ! empty($row['force_reset']) && $this->recentlyReset($ip)) {
+                $needsReset = false;
+            }
+            if ($needsReset) {
                 $reset[$ip] = true;
+                if (! empty($row['force_reset'])) {
+                    $this->rememberReset($ip);
+                }
             }
 
             $shaped[$ip] = true;
@@ -426,6 +443,25 @@ class MikrotikService
         if ($reset !== []) {
             $this->removeConnectionsFor($reset, $connections);
         }
+    }
+
+    protected function recentlyReset(string $ip): bool
+    {
+        $resetAt = Cache::store('file')->get('bandwidth.queue_reset_at', []);
+        $last = (int) (is_array($resetAt) ? ($resetAt[$ip] ?? 0) : 0);
+
+        return $last > 0 && (time() - $last) < (int) config('bandwidth.rebalance_seconds', 45);
+    }
+
+    protected function rememberReset(string $ip): void
+    {
+        $resetAt = Cache::store('file')->get('bandwidth.queue_reset_at', []);
+        if (! is_array($resetAt)) {
+            $resetAt = [];
+        }
+
+        $resetAt[$ip] = time();
+        Cache::store('file')->put('bandwidth.queue_reset_at', $resetAt, now()->addHour());
     }
 
     /**
@@ -870,8 +906,7 @@ class MikrotikService
         $totalBps = 0;
 
         foreach ($connections as $conn) {
-            $totalBps += (int) ($conn['orig-rate'] ?? 0);
-            $totalBps += (int) ($conn['repl-rate'] ?? 0);
+            $totalBps += max((int) ($conn['orig-rate'] ?? 0), (int) ($conn['repl-rate'] ?? 0));
         }
 
         return (int) ceil($totalBps / 1_000);
@@ -943,6 +978,15 @@ class MikrotikService
         $rxBps = (int) ($sample['rx-bits-per-second'] ?? 0);
         $txBps = (int) ($sample['tx-bits-per-second'] ?? 0);
 
-        return (int) ceil(($rxBps + $txBps) / 1_000);
+        return $this->directionalKbps($rxBps, $txBps);
+    }
+
+    /**
+     * A transfer is one direction of payload. Counting both directions makes the
+     * pool about twice the rate a download can actually reach.
+     */
+    public function directionalKbps(int $rxBitsPerSecond, int $txBitsPerSecond): int
+    {
+        return (int) ceil(max(0, $rxBitsPerSecond, $txBitsPerSecond) / 1_000);
     }
 }

@@ -90,8 +90,23 @@ class AllocationPreviewService
             $congestion['congested'],
         );
         $pulledBack = [];
+        $tightDownload = false;
+        foreach ($distribution as $userId => $kbps) {
+            $share = (int) $kbps;
+            $used = (int) ($usedKbps[$userId] ?? 0);
+            if ($share > 0 && $used > (int) config('bandwidth.spare_idle_kbps', 256) && ($used / $share) >= (float) config('bandwidth.tight_use_ratio', 0.8)) {
+                $tightDownload = true;
+            }
+        }
         foreach ($rawShares as $userId => $kbps) {
-            if (($distribution[$userId] ?? 0) < $kbps) {
+            $share = (int) ($distribution[$userId] ?? 0);
+            $used = (int) ($usedKbps[$userId] ?? 0);
+            $reduced = $share < (int) $kbps;
+            $stuckBelowShare = $tightDownload
+                && $share > 0
+                && $used > (int) config('bandwidth.spare_idle_kbps', 256)
+                && ($used / $share) < (float) config('bandwidth.spare_use_ratio', 0.5);
+            if ($reduced || $stuckBelowShare) {
                 $pulledBack[$userId] = true;
             }
         }

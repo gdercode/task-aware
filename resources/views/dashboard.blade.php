@@ -118,7 +118,7 @@
         <section class="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden">
             <div class="px-5 py-4 border-b border-slate-800">
                 <h2 class="text-lg font-semibold text-white">Allocations</h2>
-                <p class="text-sm text-slate-400 mt-1">Role, task, and urgency set the share. Unused bandwidth moves to a device that is filling its queue.</p>
+                <p class="text-sm text-slate-400 mt-1">Each device keeps its full share while it is downloading, so the rate can reach that queue.</p>
             </div>
             @if ($receiving->isEmpty())
                 <p class="px-5 py-10 text-sm text-slate-500 text-center">
