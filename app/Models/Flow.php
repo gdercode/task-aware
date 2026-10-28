@@ -10,6 +10,7 @@ class Flow extends Model
         'user_id',
         'task_type',
         'priority',
+        'is_active',
         'source_ip',
         'destination',
         'classification',

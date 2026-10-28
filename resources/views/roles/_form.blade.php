@@ -12,7 +12,7 @@
     <label for="percentage" class="block text-xs font-medium text-slate-400 mb-1">Percentage</label>
     <input type="number" name="percentage" id="percentage" value="{{ old('percentage', $role?->percentage ?? 10) }}" required min="0" max="100"
            class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500">
-    <p class="text-xs text-slate-500 mt-1">This percentage is the device's weight. Devices using bandwidth now have their weights added together, and each one's share is its weight divided by that total.</p>
+    <p class="text-xs text-slate-500 mt-1">Institutional importance of this role. Percentages are scaled so every role together adds up to 100. A role at 0% is blocked. During congestion, a critical task can receive more bandwidth than a higher role that is only downloading.</p>
     @error('percentage')<p class="text-xs text-red-400 mt-1">{{ $message }}</p>@enderror
 </div>
 

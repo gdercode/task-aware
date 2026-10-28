@@ -143,14 +143,15 @@ class RunBandwidthAllocator extends Command
         $snapshot->publishLive($detection, $poolMeasure, $interfaceTraffic, $allocation, $warning);
 
         $poolKbps = $allocation['pool_kbps'];
-        $this->info('Report published: '.$engine->formatKbpsDisplay($poolKbps).' ['.$poolMeasure['source'].']');
+        $condition = ($allocation['congested'] ?? false) ? 'congested' : 'stable';
+        $this->info('Report published: '.$engine->formatKbpsDisplay($poolKbps).' ['.$poolMeasure['source'].', '.$condition.' '.($allocation['utilization_percent'] ?? 0).'%]');
 
         $availableBandwidth = $poolKbps > 0 ? $engine->formatLimit($poolKbps) : '0k/0k';
         $rowsByUser = $allocation['users']->keyBy(fn ($row) => $row->user->id);
         $monitoredUsers = User::whereNotNull('ip_address')->get();
         $queuePriority = $engine->queuePriorities(
             $monitoredUsers->mapWithKeys(fn (User $user) => [
-                $user->id => (int) ($rowsByUser->get($user->id)?->role_percentage ?? $engine->roleScore((string) $user->role)),
+                $user->id => (int) ($rowsByUser->get($user->id)?->score ?? 0),
             ])->all()
         );
         $assignments = [];

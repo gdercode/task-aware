@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Flow;
 use App\Models\User;
 use Illuminate\Support\Collection;
 
@@ -34,7 +35,32 @@ class AllocationPreviewService
     {
         $measuredPoolKbps = max(0, $poolKbps);
         $monitoredUsers = User::whereNotNull('ip_address')->orderBy('name')->get();
-        $entries = $this->buildEntries($monitoredUsers, $onlineIps, $activeIps);
+        $userThroughput ??= $this->mikrotik->measureUserThroughputKbps();
+        $flowsByUser = Flow::query()
+            ->whereIn('user_id', $monitoredUsers->pluck('id'))
+            ->where('is_active', true)
+            ->get()
+            ->groupBy('user_id');
+
+        $throughputKbps = 0;
+        $competingUsers = 0;
+        foreach ($monitoredUsers as $user) {
+            $presence = $this->presence($user, $onlineIps, $activeIps);
+            $used = (int) ($userThroughput[$user->id]['total_kbps'] ?? 0);
+            $throughputKbps += $used;
+
+            if ($presence['is_online'] && $presence['role_percentage'] > 0 && ($presence['using_bandwidth'] || $presence['activity_status'] === 'active' || $used > 0)) {
+                $competingUsers++;
+            }
+        }
+
+        $eligibleOnline = $competingUsers;
+        if ($measuredPoolKbps <= 0 && $eligibleOnline > 0) {
+            $poolKbps = (int) config('bandwidth.min_pool_kbps', 64);
+        }
+
+        $congestion = $this->engine->assessCongestion($poolKbps, $throughputKbps, $competingUsers);
+        $entries = $this->buildEntries($monitoredUsers, $onlineIps, $activeIps, $flowsByUser, $congestion['congested']);
 
         $allocatableScores = collect($entries)
             ->filter(fn ($entry) => $entry['is_online'] && $entry['effective_score'] > 0)
@@ -42,31 +68,18 @@ class AllocationPreviewService
             ->all();
 
         $totalScore = array_sum($allocatableScores);
-
-        $eligibleOnline = collect($entries)->filter(
-            fn ($entry) => $entry['is_online'] && in_array($entry['activity_status'], ['active', 'low_usage'], true)
-        )->count();
-
-        if ($measuredPoolKbps <= 0 && ($totalScore > 0 || $eligibleOnline > 0)) {
-            $poolKbps = config('bandwidth.min_pool_kbps', 64);
-        }
-
         $poolUsingFallback = $measuredPoolKbps <= 0 && $poolKbps > 0;
-        $rolePercentages = collect($entries)
-            ->mapWithKeys(fn ($entry, $userId) => [$userId => (int) $entry['role_percentage']])
-            ->all();
-        $distribution = $this->engine->distributePool($allocatableScores, $poolKbps);
-        $distribution = $this->engine->capSharesByRole($distribution, $rolePercentages);
-        $userThroughput ??= $this->mikrotik->measureUserThroughputKbps();
-        $usedKbps = [];
+        $context = [];
         foreach ($entries as $userId => $entry) {
-            $usedKbps[$userId] = (int) ($userThroughput[$userId]['total_kbps'] ?? 0);
+            $context[$userId] = [
+                'task' => $entry['task_type'],
+                'active' => $entry['activity_status'] === 'active' || $entry['using_bandwidth'],
+            ];
         }
-        $roleShare = $distribution;
-        $distribution = $this->engine->holdBelowActiveHigherPriority($distribution, $rolePercentages, $usedKbps);
-        $distribution = $this->engine->capSharesByRole($distribution, $rolePercentages);
+        $rawShares = $this->engine->distributePool($allocatableScores, $poolKbps);
+        $distribution = $this->engine->shapeShares($allocatableScores, $context, $poolKbps, $congestion['congested']);
         $pulledBack = [];
-        foreach ($roleShare as $userId => $kbps) {
+        foreach ($rawShares as $userId => $kbps) {
             if (($distribution[$userId] ?? 0) < $kbps) {
                 $pulledBack[$userId] = true;
             }
@@ -98,6 +111,13 @@ class AllocationPreviewService
                 'unknown' => collect($entries)->where('activity_status', 'unknown')->count(),
             ],
             'users' => $rows,
+            'congested' => $congestion['congested'],
+            'congestion_label' => $congestion['label'],
+            'utilization_percent' => $congestion['utilization_percent'],
+            'capacity_kbps' => $congestion['capacity_kbps'],
+            'capacity_source' => $congestion['capacity_source'],
+            'competing_users' => $congestion['competing_users'],
+            'congestion_threshold_percent' => $congestion['threshold_percent'],
         ] + $usageSummary;
     }
 
@@ -196,33 +216,94 @@ class AllocationPreviewService
      * @param  Collection<int, User>  $monitoredUsers
      * @param  array<string, true>  $onlineIps
      * @param  array<string, true>  $activeIps
+     * @param  Collection<int|string, Collection<int, Flow>>  $flowsByUser
      * @return array<int, array<string, mixed>>
      */
-    protected function buildEntries(Collection $monitoredUsers, array $onlineIps, array $activeIps): array
+    protected function buildEntries(Collection $monitoredUsers, array $onlineIps, array $activeIps, Collection $flowsByUser, bool $congested): array
     {
         $entries = [];
 
         foreach ($monitoredUsers as $user) {
-            $ip = $this->mikrotik->normalizeIp($user->ip_address);
-            $isOnline = $this->mikrotik->isDeviceOnline($user->ip_address, $onlineIps);
-            $usingBandwidth = $isOnline && $ip !== '' && isset($activeIps[$ip]);
-            $activityStatus = $isOnline ? ($user->activity_status ?: 'unknown') : 'offline';
-            $rolePercentage = $this->engine->roleScore((string) $user->role);
-            $effectiveScore = ($isOnline && $rolePercentage > 0) ? $rolePercentage : 0;
+            $presence = $this->presence($user, $onlineIps, $activeIps);
+            $task = $this->dominantTask($user, $flowsByUser->get($user->id, collect()), $congested);
+            $baseScore = $this->engine->calculate($user->role, $task['task'], $task['urgency'], $congested);
+            $effectiveScore = $presence['is_online']
+                ? $this->engine->effectiveScore($baseScore, $presence['activity_status'], (string) $user->role)
+                : 0;
 
             $entries[$user->id] = [
                 'user' => $user,
-                'base_score' => $rolePercentage,
-                'role_percentage' => $rolePercentage,
+                'base_score' => $baseScore,
+                'role_percentage' => $presence['role_percentage'],
                 'effective_score' => $effectiveScore,
-                'activity_status' => $activityStatus,
-                'task_type' => $user->current_task_type ?? 'NORMAL',
-                'is_online' => $isOnline,
-                'using_bandwidth' => $usingBandwidth,
+                'activity_status' => $presence['activity_status'],
+                'task_type' => $task['task'],
+                'urgency' => $task['urgency'],
+                'task_priority' => $task['priority'],
+                'is_online' => $presence['is_online'],
+                'using_bandwidth' => $presence['using_bandwidth'],
             ];
         }
 
         return $entries;
+    }
+
+    /**
+     * @param  array<string, true>  $onlineIps
+     * @param  array<string, true>  $activeIps
+     * @return array{is_online: bool, using_bandwidth: bool, activity_status: string, role_percentage: int}
+     */
+    protected function presence(User $user, array $onlineIps, array $activeIps): array
+    {
+        $ip = $this->mikrotik->normalizeIp($user->ip_address);
+        $isOnline = $this->mikrotik->isDeviceOnline($user->ip_address, $onlineIps);
+
+        return [
+            'is_online' => $isOnline,
+            'using_bandwidth' => $isOnline && $ip !== '' && isset($activeIps[$ip]),
+            'activity_status' => $isOnline ? ($user->activity_status ?: 'unknown') : 'offline',
+            'role_percentage' => $this->engine->roleScore((string) $user->role),
+        ];
+    }
+
+    /**
+     * @param  Collection<int, Flow>  $flows
+     * @return array{task: string, urgency: int, priority: int}
+     */
+    protected function dominantTask(User $user, Collection $flows, bool $congested): array
+    {
+        $best = null;
+        $bestScore = -1;
+
+        foreach ($flows as $flow) {
+            $task = $flow->classification ?: $flow->task_type ?: 'NORMAL';
+            $urgency = (int) ($flow->urgency_weight ?? 0);
+            if ($urgency < 1) {
+                $urgency = $this->engine->urgencyFor($task, (int) $flow->bytes);
+            }
+
+            $score = $this->engine->calculate($user->role, $task, $urgency, $congested);
+            if ($score > $bestScore) {
+                $bestScore = $score;
+                $best = [
+                    'task' => $task,
+                    'urgency' => $urgency,
+                    'priority' => $this->engine->taskPriority($task),
+                ];
+            }
+        }
+
+        if ($best !== null) {
+            return $best;
+        }
+
+        $task = $user->current_task_type ?: 'NORMAL';
+
+        return [
+            'task' => $task,
+            'urgency' => $this->engine->urgencyFor($task),
+            'priority' => $this->engine->taskPriority($task),
+        ];
     }
 
     /**
@@ -270,6 +351,8 @@ class AllocationPreviewService
                 'activity_status' => $entry['activity_status'],
                 'activity_label' => $this->activity->activityLabel($entry['activity_status']),
                 'task_type' => $entry['task_type'],
+                'urgency' => $entry['urgency'],
+                'task_priority' => $entry['task_priority'],
                 'is_online' => $entry['is_online'],
                 'using_bandwidth' => $entry['using_bandwidth'],
                 'share_percent' => $sharePercent,
@@ -312,24 +395,32 @@ class AllocationPreviewService
     {
         return match ($taskType) {
             'REAL_TIME' => [
-                'label' => 'Real-time',
-                'effect' => 'Raises this share of the pool',
+                'label' => 'Video conferencing',
+                'effect' => 'High task priority and urgency. Protected while the network is congested.',
+            ],
+            'LEARNING' => [
+                'label' => 'Online learning',
+                'effect' => 'High institutional priority. Kept above bulk traffic during congestion.',
+            ],
+            'COLLABORATION' => [
+                'label' => 'Digital collaboration',
+                'effect' => 'Cloud and collaboration traffic is ranked above general use.',
             ],
             'DATA_TRANSFER' => [
-                'label' => 'Upload',
-                'effect' => 'Takes a medium share of the pool',
+                'label' => 'Data transfer',
+                'effect' => 'Medium priority from the task and its urgency.',
             ],
             'STREAMING' => [
                 'label' => 'Streaming',
-                'effect' => 'Takes a smaller share than real-time',
+                'effect' => 'Yields bandwidth when critical activities need the link.',
             ],
             'BULK' => [
                 'label' => 'Bulk download',
-                'effect' => 'Takes the smallest share of the pool',
+                'effect' => 'Lowest priority. Capped while the network is congested.',
             ],
             default => [
                 'label' => 'General use',
-                'effect' => 'Takes a standard share of the pool',
+                'effect' => 'Share follows role, task priority, and urgency.',
             ],
         };
     }

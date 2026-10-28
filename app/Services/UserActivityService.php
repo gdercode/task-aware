@@ -32,9 +32,9 @@ class UserActivityService
         $baseScore = $this->bestActiveFlowScore($user);
         $taskType = $this->bestActiveFlowTaskType($user);
 
-        if ($baseScore === 0) {
-            $baseScore = $this->engine->calculate($user->role, 'NORMAL', 1);
+        if ($taskType === null) {
             $taskType = 'NORMAL';
+            $baseScore = $this->engine->calculate($user->role, $taskType, $this->engine->urgencyFor($taskType));
         }
 
         $previousBytes = (int) $user->last_traffic_bytes;
@@ -60,10 +60,6 @@ class UserActivityService
             'effective_score' => $effectiveScore,
             'current_task_type' => $taskType,
         ]);
-
-        Flow::where('user_id', $user->id)
-            ->where('is_active', true)
-            ->update(['importance_score' => $effectiveScore > 0 ? $baseScore : 0]);
 
         return [
             'status' => $status,

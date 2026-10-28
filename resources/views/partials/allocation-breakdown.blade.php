@@ -20,8 +20,13 @@
             </span>
         </p>
         <p class="text-xs text-slate-500 mt-2">
-            The queue comes from the role weight of each device that is using bandwidth now.
-            When live use fills that queue, the limit is what holds the extra traffic back.
+            Each queue is the device's share of the pool after role, task priority, and urgency are combined.
+            @if ($allocation['congested'] ?? false)
+                The network is congested, so video conferencing and online learning are protected and bulk or streaming traffic is capped.
+            @else
+                The network is stable, so lower-priority work still receives a usable share.
+            @endif
+            When live use fills a queue, that limit holds the extra traffic back.
         </p>
     </div>
     <div class="overflow-x-auto">
@@ -79,6 +84,11 @@
                             <td class="px-5 py-3">
                                 <span class="text-white">{{ $row->task_label ?? ($row->task_type ?: 'General use') }}</span>
                                 <span class="block text-xs text-slate-500 mt-0.5">{{ $row->task_effect ?? $row->activity_label }}</span>
+                                <span class="block text-xs text-slate-600 mt-0.5">
+                                    Role {{ (int) ($row->role_percentage ?? 0) }}%
+                                    · urgency {{ (int) ($row->urgency ?? 0) }}
+                                    · score {{ number_format((int) ($row->score ?? 0)) }}
+                                </span>
                                 <span class="block text-xs text-slate-600 mt-0.5">↓ {{ number_format($row->throughput_down_kbps ?? 0) }} · ↑ {{ number_format($row->throughput_up_kbps ?? 0) }} Kbps</span>
                             </td>
                             <td class="px-5 py-3 text-right font-mono font-semibold {{ $used > 0 ? 'text-sky-300' : 'text-slate-500' }}">

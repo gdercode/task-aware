@@ -27,18 +27,19 @@ class FlowSeeder extends Seeder
                 continue;
             }
 
-            $score = $engine->calculate($user->role, $sample['classification'], 1);
+            $urgency = $engine->urgencyFor($sample['classification']);
+            $score = $engine->calculate($user->role, $sample['classification'], $urgency);
 
             Flow::create([
                 'user_id' => $user->id,
                 'task_type' => $sample['classification'],
-                'priority' => 1,
+                'priority' => $engine->taskPriority($sample['classification']),
                 'is_active' => true,
                 'source_ip' => $user->ip_address,
                 'destination' => $sample['destination'],
                 'classification' => $sample['classification'],
                 'bytes' => rand(100000, 50000000),
-                'urgency_weight' => 1,
+                'urgency_weight' => $urgency,
                 'importance_score' => $score,
             ]);
         }

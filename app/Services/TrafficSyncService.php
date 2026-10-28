@@ -51,6 +51,8 @@ class TrafficSyncService
 
             $bytes = (int) ($conn['bytes'] ?? $conn['orig-bytes'] ?? 0);
             $classification = $detector->classify($dst, $bytes, false);
+            $urgency = $this->engine->urgencyFor($classification, $bytes);
+            $priority = $this->engine->taskPriority($classification);
 
             $userBytes[$user->id] = ($userBytes[$user->id] ?? 0) + $bytes;
             $seenUserIds[$user->id] = true;
@@ -61,28 +63,30 @@ class TrafficSyncService
             $score = $this->engine->calculate(
                 $user->role,
                 $classification,
-                $flow?->urgency_weight ?? 1
+                $urgency
             );
 
             if ($flow) {
                 $flow->update([
                     'classification' => $classification,
                     'task_type' => $classification,
+                    'priority' => $priority,
                     'bytes' => max($flow->bytes, $bytes),
                     'source_ip' => $srcIp,
+                    'urgency_weight' => $urgency,
                     'importance_score' => $score,
                 ]);
             } else {
                 $flowIndex[$flowKey] = Flow::create([
                     'user_id' => $user->id,
                     'task_type' => $classification,
-                    'priority' => 1,
+                    'priority' => $priority,
                     'is_active' => true,
                     'source_ip' => $srcIp,
                     'destination' => $dst,
                     'classification' => $classification,
                     'bytes' => $bytes,
-                    'urgency_weight' => 1,
+                    'urgency_weight' => $urgency,
                     'importance_score' => $score,
                 ]);
             }

@@ -1,6 +1,6 @@
 @extends('layouts.app')
 
-@section('title', 'AL Reports Dashboard')
+@section('title', 'Dashboard')
 
 @push('head')
     <script>
@@ -15,166 +15,199 @@
 @endpush
 
 @section('content')
+@php
+    $live = $reportState === 'live';
+    $congested = $live && (bool) ($allocation['congested'] ?? false);
+    $utilization = (int) ($allocation['utilization_percent'] ?? 0);
+    $receiving = $activeUsers->sortByDesc(fn ($row) => (int) ($row->share_kbps ?? 0))->values();
+@endphp
+
 <div class="min-h-screen">
     <header class="border-b border-slate-800 bg-slate-900/50">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
                 <p class="text-xs font-medium uppercase tracking-wider text-emerald-400">Task-Aware Bandwidth</p>
-                <h1 class="text-xl sm:text-2xl font-semibold text-white">Allocation Dashboard</h1>
+                <h1 class="text-xl sm:text-2xl font-semibold text-white">Dashboard</h1>
             </div>
             <div class="flex items-center gap-3 text-sm text-slate-400">
-                @if ($reportState === 'live')
-                    <span class="inline-flex items-center gap-1.5">
+                @if ($live)
+                    <span class="inline-flex items-center gap-1.5 text-emerald-300">
                         <span class="relative flex h-2 w-2">
                             <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                             <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
                         </span>
-                        Live report
+                        Live
                         @if ($reportUpdatedAt)
                             <span class="text-slate-500">· {{ $reportUpdatedAt->diffForHumans() }}</span>
                         @endif
                     </span>
                 @elseif ($reportState === 'offline')
-                    <span class="inline-flex items-center gap-1.5 text-amber-400">
-                        <span class="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                    <span class="inline-flex items-center gap-1.5 text-amber-300">
+                        <span class="h-2 w-2 rounded-full bg-amber-500"></span>
                         Router offline
                     </span>
                 @else
-                    <span class="inline-flex items-center gap-1.5 text-amber-400">
-                        <span class="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
-                        Waiting for allocator
+                    <span class="inline-flex items-center gap-1.5 text-amber-300">
+                        <span class="h-2 w-2 rounded-full bg-amber-500"></span>
+                        Allocator stopped
                     </span>
                 @endif
-                <button onclick="location.reload()" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-medium transition-colors">
-                    Refresh now
-                </button>
             </div>
         </div>
     </header>
 
-    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        @include('partials.allocation-graph', ['allocation' => $allocation, 'users' => $users])
-
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
         @if (session('success'))
             <div class="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
                 {{ session('success') }}
             </div>
         @endif
 
-        @include('partials.mikrotik-settings')
-
-        @if ($mikrotikConnected && $detection)
-            @include('partials.detection-diagnostics', ['detection' => $detection])
-        @endif
-
-        @if ($reportState === 'waiting')
+        @if (! $live)
             <div class="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-                <strong>Report not ready.</strong> This page reads the latest snapshot and does not query MikroTik.
-                Start <code class="text-amber-100">php artisan bandwidth:run</code> so devices are identified and the report is published.
+                @if ($reportState === 'offline')
+                    The router is not responding, so there is no live allocation.
+                @else
+                    Start <code class="text-amber-100">php artisan bandwidth:run</code> to publish a live allocation.
+                @endif
             </div>
-        @elseif ($reportState === 'offline')
-            <div class="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-                <strong>No live allocations.</strong> MikroTik is unreachable, so the allocator has not published a report.
-                Allocations come from <code class="text-amber-100">php artisan bandwidth:run</code>.
-            </div>
-        @endif
-
-        @if ($mikrotikConnected && !empty($bandwidthMeasureError))
+        @elseif (! empty($bandwidthMeasureError))
             <div class="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
                 {{ $bandwidthMeasureError }}
             </div>
         @endif
 
-        @if ($mikrotikConnected && empty($bandwidthMeasureError) && $stats['active_users'] === 0 && ($stats['online_devices'] ?? 0) > 0)
-            <div class="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-                <strong>{{ $stats['online_devices'] }} device(s) online</strong> but none are receiving bandwidth yet.
-                Check the <em>Live allocation breakdown</em> below for each user's activity status.
-                Users need matching IP addresses and active internet connections on MikroTik.
-                @if (($stats['activity']['offline'] ?? 0) > 0)
-                    <span class="block mt-1">{{ $stats['activity']['offline'] }} marked offline — verify IPs in Users match router ARP/DHCP.</span>
-                @endif
-                @if (($stats['activity']['idle'] ?? 0) > 0)
-                    <span class="block mt-1">{{ $stats['activity']['idle'] }} idle — no recent traffic detected.</span>
-                @endif
-            </div>
-        @endif
-
-        @if ($mikrotikConnected && empty($bandwidthMeasureError) && $stats['active_users'] === 0 && ($stats['online_devices'] ?? 0) === 0 && $users->isNotEmpty())
-            <div class="rounded-lg border border-slate-700 bg-slate-800/50 px-4 py-3 text-sm text-slate-300">
-                MikroTik is connected but no monitored user traffic was detected. Ensure user IP addresses match active connections on the router, then run <code class="text-emerald-300">php artisan bandwidth:run</code>.
-            </div>
-        @endif
-
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
-            <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
-                <p class="text-sm text-slate-400">Getting Bandwidth</p>
-                <p class="mt-1 text-3xl font-semibold text-emerald-400">{{ number_format($stats['active_users']) }}</p>
-                <p class="text-xs text-slate-500 mt-1">Online devices with allocation</p>
-            </div>
-            <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
-                <p class="text-sm text-slate-400">Not Using Bandwidth</p>
-                <p class="mt-1 text-3xl font-semibold text-slate-400">{{ number_format($stats['inactive_users']) }}</p>
-                <p class="text-xs text-slate-500 mt-1">Offline or no traffic</p>
-            </div>
-            <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
-                <p class="text-sm text-slate-400">Devices Online</p>
-                <p class="mt-1 text-3xl font-semibold text-white">{{ number_format($stats['online_devices'] ?? 0) }}</p>
-                @if (!empty($stats['activity']))
-                    <p class="text-xs text-slate-500 mt-1">
-                        {{ $stats['activity']['active'] ?? 0 }} active · {{ $stats['activity']['idle'] ?? 0 }} idle
-                    </p>
-                @endif
-            </div>
-            <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
-                <p class="text-sm text-slate-400">Data in use</p>
-                <p class="mt-1 text-3xl font-semibold text-sky-400">{{ number_format($stats['total_throughput_kbps'] ?? 0) }}</p>
-                <p class="text-xs text-slate-500 mt-1">Kbps moving on user connections</p>
-            </div>
-            <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
-                <p class="text-sm text-slate-400">Allocated</p>
-                @if ($mikrotikConnected && $stats['total_available_bandwidth'] !== null)
-                    <p class="mt-1 text-3xl font-semibold text-emerald-400">{{ number_format($stats['total_allocated_kbps'] ?? 0) }}</p>
-                    <p class="text-xs text-slate-500 mt-1 font-mono">Kbps shared from {{ $stats['total_available_bandwidth'] }}</p>
-                    @if ($stats['total_available_at'])
-                        <p class="text-xs text-slate-500">{{ $stats['total_available_at']->format('M j, H:i:s') }}</p>
-                    @endif
-                @else
-                    <p class="mt-1 text-3xl font-semibold text-slate-500">—</p>
-                    <p class="text-xs text-slate-500 mt-1">Waiting for a live pool measurement</p>
-                @endif
-            </div>
-            <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
-                <p class="text-sm text-slate-400">Allocation in use</p>
-                <p class="mt-1 text-3xl font-semibold {{ ($stats['users_at_limit'] ?? 0) > 0 ? 'text-amber-400' : 'text-white' }}">{{ number_format($stats['usage_of_allocated_percent'] ?? 0) }}%</p>
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div @class([
+                'rounded-xl border p-5',
+                'border-amber-500/40 bg-amber-500/10' => $congested,
+                'border-slate-800 bg-slate-900' => ! $congested,
+            ])>
+                <p class="text-sm text-slate-400">Network</p>
+                <p @class(['mt-1 text-2xl font-semibold', 'text-amber-200' => $congested, 'text-white' => ! $congested])>
+                    {{ $live ? ($allocation['congestion_label'] ?? 'Stable') : '—' }}
+                </p>
                 <p class="text-xs text-slate-500 mt-1">
-                    @if (($stats['users_at_limit'] ?? 0) > 0)
-                        {{ $stats['users_at_limit'] }} user{{ ($stats['users_at_limit'] ?? 0) === 1 ? '' : 's' }} at the queue limit
-                    @else
-                        Live use compared with allocated queues
-                    @endif
+                    {{ $live ? $utilization.'% of capacity in use' : 'No live report' }}
+                </p>
+            </div>
+            <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
+                <p class="text-sm text-slate-400">In use</p>
+                <p class="mt-1 text-2xl font-semibold text-sky-300">
+                    {{ $live ? number_format($stats['total_throughput_kbps'] ?? 0) : '—' }}
+                </p>
+                <p class="text-xs text-slate-500 mt-1">Kbps moving now</p>
+            </div>
+            <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
+                <p class="text-sm text-slate-400">Pool</p>
+                <p class="mt-1 text-2xl font-semibold text-emerald-400">
+                    {{ $live ? number_format($stats['pool_kbps'] ?? 0) : '—' }}
+                </p>
+                <p class="text-xs text-slate-500 mt-1">Kbps available to share</p>
+            </div>
+            <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
+                <p class="text-sm text-slate-400">Receiving</p>
+                <p class="mt-1 text-2xl font-semibold text-white">{{ number_format($receiving->count()) }}</p>
+                <p class="text-xs text-slate-500 mt-1">
+                    {{ number_format($stats['online_devices'] ?? 0) }} online
+                    · {{ number_format($inactiveUsers->count()) }} waiting
                 </p>
             </div>
         </div>
 
-        @if ($mikrotikConnected)
-            @include('partials.allocation-breakdown', ['allocation' => $allocation])
+        <section class="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-800">
+                <h2 class="text-lg font-semibold text-white">Allocations</h2>
+                <p class="text-sm text-slate-400 mt-1">Role, task priority, and urgency decide each share.</p>
+            </div>
+            @if ($receiving->isEmpty())
+                <p class="px-5 py-10 text-sm text-slate-500 text-center">
+                    {{ $live ? 'No device is receiving bandwidth.' : 'Allocations appear here once the report is live.' }}
+                </p>
+            @else
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="text-left text-slate-400 border-b border-slate-800">
+                                <th class="px-5 py-3 font-medium">Device</th>
+                                <th class="px-5 py-3 font-medium">Role</th>
+                                <th class="px-5 py-3 font-medium">Task</th>
+                                <th class="px-5 py-3 font-medium text-right">In use</th>
+                                <th class="px-5 py-3 font-medium text-right">Allocated</th>
+                                <th class="px-5 py-3 font-medium">Share</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-800">
+                            @foreach ($receiving as $row)
+                                @php
+                                    $share = min(100, max(0, (float) ($row->share_percent ?? 0)));
+                                @endphp
+                                <tr class="hover:bg-slate-800/50">
+                                    <td class="px-5 py-3">
+                                        <a href="{{ route('allocation-reports', $row->user) }}" class="font-medium text-white hover:text-emerald-300">
+                                            {{ $row->user->name }}
+                                        </a>
+                                        <span class="block text-xs font-mono text-slate-500">{{ $row->user->ip_address }}</span>
+                                    </td>
+                                    <td class="px-5 py-3">
+                                        @include('partials.role-badge', ['role' => $row->user->role])
+                                    </td>
+                                    <td class="px-5 py-3 text-slate-200">
+                                        {{ $row->task_label ?? 'General use' }}
+                                        <span class="block text-xs text-slate-500">Urgency {{ (int) ($row->urgency ?? 0) }}</span>
+                                    </td>
+                                    <td class="px-5 py-3 text-right font-mono text-sky-300">
+                                        {{ number_format((int) ($row->throughput_total_kbps ?? 0)) }}
+                                    </td>
+                                    <td class="px-5 py-3 text-right font-mono text-emerald-400">
+                                        {{ number_format((int) ($row->share_kbps ?? 0)) }}
+                                    </td>
+                                    <td class="px-5 py-3 min-w-[140px]">
+                                        <div class="flex items-center gap-2">
+                                            <div class="h-2 flex-1 rounded-full bg-slate-800 overflow-hidden">
+                                                <div class="h-full rounded-full {{ $congested ? 'bg-amber-400' : 'bg-emerald-400' }}" style="width: {{ $share }}%"></div>
+                                            </div>
+                                            <span class="w-10 text-right font-mono text-xs text-slate-300">{{ (int) round($share) }}%</span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            @endif
+        </section>
+
+        @if ($inactiveUsers->isNotEmpty())
+            <section class="rounded-xl border border-slate-800 bg-slate-900 px-5 py-4">
+                <h2 class="text-sm font-medium text-slate-300">Not receiving bandwidth</h2>
+                <ul class="mt-3 flex flex-wrap gap-2">
+                    @foreach ($inactiveUsers as $row)
+                        <li class="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-800/60 px-3 py-1 text-xs text-slate-300">
+                            <span class="text-white">{{ $row->user->name }}</span>
+                            <span class="text-slate-500">{{ $row->offline_reason ?? 'Not using' }}</span>
+                        </li>
+                    @endforeach
+                </ul>
+            </section>
         @endif
 
-        @include('partials.user-table', [
-            'title' => 'Getting Bandwidth',
-            'users' => $activeUsers,
-            'status' => 'active',
-            'emptyMessage' => $mikrotikConnected
-                ? 'No users receiving bandwidth. See the allocation breakdown above — users may be offline, idle, or have IP mismatches.'
-                : 'Connect to MikroTik and run the allocator to see live allocations.',
-        ])
-
-        @include('partials.user-table', [
-            'title' => 'Not Using Bandwidth',
-            'users' => $inactiveUsers,
-            'status' => 'inactive',
-            'emptyMessage' => 'All monitored users are currently receiving bandwidth.',
-        ])
+        <details class="rounded-xl border border-slate-800 bg-slate-900" @if ($errors->any()) open @endif>
+            <summary class="cursor-pointer px-5 py-4 text-sm text-slate-300 flex items-center justify-between gap-3">
+                <span>
+                    Router
+                    <span class="font-mono text-slate-400">{{ $mikrotikSettings->host }}:{{ $mikrotikSettings->port }}</span>
+                </span>
+                <span @class([
+                    'text-xs font-medium',
+                    'text-emerald-300' => $live,
+                    'text-amber-300' => ! $live,
+                ])>{{ $live ? 'Connected' : 'Not connected' }}</span>
+            </summary>
+            <div class="px-5 pb-5 border-t border-slate-800">
+                @include('partials.mikrotik-settings')
+            </div>
+        </details>
     </main>
 </div>
 @endsection

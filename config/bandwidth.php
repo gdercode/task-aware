@@ -43,4 +43,33 @@ return [
 
     'min_pool_kbps' => (int) env('BANDWIDTH_MIN_POOL_KBPS', 64),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Link capacity and congestion
+    |--------------------------------------------------------------------------
+    |
+    | Congestion is demand compared with this capacity. Leave the capacity at 0
+    | to use the observed pool (the recent peak on the monitor interface).
+    | When two or more devices are active and use reaches the threshold, task
+    | priority and urgency outweigh institutional role, and critical tasks are
+    | protected.
+    |
+    */
+
+    'link_capacity_kbps' => (int) env('BANDWIDTH_LINK_CAPACITY_KBPS', 0),
+
+    'congestion_percent' => (int) env('BANDWIDTH_CONGESTION_PERCENT', 70),
+
+    'calm_task_weight' => (float) env('BANDWIDTH_CALM_TASK_WEIGHT', 0.35),
+
+    'congested_task_weight' => (float) env('BANDWIDTH_CONGESTED_TASK_WEIGHT', 0.65),
+
+    'critical_floor_kbps' => (int) env('BANDWIDTH_CRITICAL_FLOOR_KBPS', 512),
+
+    'critical_budget_percent' => (int) env('BANDWIDTH_CRITICAL_BUDGET_PERCENT', 70),
+
+    'bulk_cap_percent' => (int) env('BANDWIDTH_BULK_CAP_PERCENT', 10),
+
+    'streaming_cap_percent' => (int) env('BANDWIDTH_STREAMING_CAP_PERCENT', 20),
+
 ];
