@@ -201,6 +201,35 @@ class RunBandwidthAllocator extends Command
             ];
         }
 
+        $registeredIps = [];
+        foreach ($monitoredUsers as $user) {
+            $ip = $mikrotik->normalizeIp($user->ip_address);
+            if ($ip !== '') {
+                $registeredIps[$ip] = true;
+            }
+        }
+
+        foreach ($detection['devices'] ?? [] as $device) {
+            if (! ($device['connected'] ?? false) || ! empty($device['user_id'])) {
+                continue;
+            }
+
+            $ip = $mikrotik->normalizeIp($device['ip'] ?? null);
+            if ($ip === '' || isset($registeredIps[$ip])) {
+                continue;
+            }
+
+            $assignments[] = [
+                'name' => 'blocked-'.str_replace(['.', ':'], '-', $ip),
+                'target' => $ip,
+                'max_limit' => $engine->blockedLimit(),
+                'priority' => '8',
+                'blocked' => true,
+                'force_reset' => false,
+            ];
+            $this->line("{$ip} → blocked (not registered, no share)");
+        }
+
         if ($poolKbps <= 0) {
             $enforcement = $mikrotik->applyAccessControl($assignments, $connections, false, null);
             if ($enforcement['error']) {

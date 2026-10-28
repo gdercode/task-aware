@@ -20,6 +20,27 @@
     $congested = $live && (bool) ($allocation['congested'] ?? false);
     $utilization = (int) ($allocation['utilization_percent'] ?? 0);
     $receiving = $activeUsers->sortByDesc(fn ($row) => (int) ($row->share_kbps ?? 0))->values();
+    $listedUserIds = [];
+    foreach ($receiving as $row) {
+        $listedUserIds[$row->user->id] = true;
+    }
+    $alsoUsing = [];
+    if ($live) {
+        foreach ($detection['devices'] ?? [] as $device) {
+            $moving = ($device['using_bandwidth'] ?? false) || (int) ($device['rate_kbps'] ?? 0) > 0;
+            if (! $moving || ! ($device['connected'] ?? false)) {
+                continue;
+            }
+
+            $userId = $device['user_id'] ?? null;
+            if ($userId && isset($listedUserIds[$userId])) {
+                continue;
+            }
+
+            $alsoUsing[] = $device;
+        }
+    }
+    $usingCount = $receiving->count() + count($alsoUsing);
 @endphp
 
 <div class="min-h-screen">
@@ -107,7 +128,7 @@
             </div>
             <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
                 <p class="text-sm text-slate-400">Receiving</p>
-                <p class="mt-1 text-2xl font-semibold text-white">{{ number_format($receiving->count()) }}</p>
+                <p class="mt-1 text-2xl font-semibold text-white">{{ number_format($usingCount) }}</p>
                 <p class="text-xs text-slate-500 mt-1">
                     {{ number_format($stats['online_devices'] ?? 0) }} online
                     · {{ number_format($inactiveUsers->count()) }} waiting
@@ -118,9 +139,9 @@
         <section class="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden">
             <div class="px-5 py-4 border-b border-slate-800">
                 <h2 class="text-lg font-semibold text-white">Allocations</h2>
-                <p class="text-sm text-slate-400 mt-1">Each device keeps its full share while it is downloading, so the rate can reach that queue.</p>
+                <p class="text-sm text-slate-400 mt-1">A computer with a share can use the link. One that is not registered stays on this list with no share, and its internet is blocked.</p>
             </div>
-            @if ($receiving->isEmpty())
+            @if ($receiving->isEmpty() && $alsoUsing === [])
                 <p class="px-5 py-10 text-sm text-slate-500 text-center">
                     {{ $live ? 'No device is receiving bandwidth.' : 'Allocations appear here once the report is live.' }}
                 </p>
@@ -169,6 +190,39 @@
                                             </div>
                                             <span class="w-10 text-right font-mono text-xs text-slate-300">{{ (int) round($share) }}%</span>
                                         </div>
+                                    </td>
+                                </tr>
+                            @endforeach
+                            @foreach ($alsoUsing as $device)
+                                <tr class="hover:bg-slate-800/50">
+                                    <td class="px-5 py-3">
+                                        <span class="font-medium text-white">{{ $device['registered_name'] ?: ($device['hostname'] ?: 'Unknown computer') }}</span>
+                                        <span class="block text-xs font-mono text-slate-500">{{ $device['ip'] }}</span>
+                                    </td>
+                                    <td class="px-5 py-3">
+                                        <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/20 text-red-300">Not registered</span>
+                                    </td>
+                                    <td class="px-5 py-3 text-slate-400">No share</td>
+                                    <td class="px-5 py-3 text-right font-mono text-sky-300">
+                                        {{ number_format((int) ($device['rate_kbps'] ?? 0)) }}
+                                    </td>
+                                    <td class="px-5 py-3 text-right font-mono text-slate-500">0</td>
+                                    <td class="px-5 py-3">
+                                        <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/20 text-red-300">Internet blocked</span>
+                                        @if (empty($device['user_id']) && \App\Models\Role::defaultSlug())
+                                            <form method="POST" action="{{ route('devices.register') }}" class="mt-2">
+                                                @csrf
+                                                <input type="hidden" name="ip_address" value="{{ $device['ip'] }}">
+                                                @if (! empty($device['mac']))
+                                                    <input type="hidden" name="mac_address" value="{{ $device['mac'] }}">
+                                                @endif
+                                                <input type="hidden" name="role" value="{{ \App\Models\Role::defaultSlug() }}">
+                                                <input type="hidden" name="name" value="{{ $device['hostname'] ?: $device['ip'] }}">
+                                                <button type="submit" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700">
+                                                    Register
+                                                </button>
+                                            </form>
+                                        @endif
                                     </td>
                                 </tr>
                             @endforeach

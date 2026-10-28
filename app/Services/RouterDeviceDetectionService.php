@@ -146,6 +146,22 @@ class RouterDeviceDetectionService
             $candidates[$ip] = true;
         }
 
+        foreach ($sources['connections']['details'] ?? [] as $ip => $detail) {
+            if (! is_string($ip) || isset($candidates[$ip])) {
+                continue;
+            }
+
+            if ((int) ($detail['rate_bps'] ?? 0) <= 0) {
+                continue;
+            }
+
+            if (! $this->isLanClientIp($ip) || isset($routerIps[$ip]) || isset($wan['gateways'][$ip])) {
+                continue;
+            }
+
+            $candidates[$ip] = true;
+        }
+
         $knownUsers = User::query()
             ->where(function ($query) {
                 $query->whereNotNull('ip_address')->orWhereNotNull('mac_address');
