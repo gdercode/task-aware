@@ -17,9 +17,11 @@ use Illuminate\Support\Facades\Cache;
 
 class RunBandwidthAllocator extends Command
 {
-    protected $signature = 'bandwidth:run';
+    protected $signature = 'bandwidth:run {--once : Read current devices and push one allocation to the router}';
 
     protected $description = 'Real-time bandwidth allocation engine';
+
+    protected bool $pause = true;
 
     public function handle(
         MikrotikService $mikrotik,
@@ -30,6 +32,23 @@ class RunBandwidthAllocator extends Command
         RouterDeviceDetectionService $deviceDetection,
         AllocationSnapshotService $snapshot,
     ) {
+        $this->pause = ! $this->option('once');
+
+        if ($this->option('once')) {
+            $this->info('Applying one allocation...');
+            $this->cycle(
+                $mikrotik,
+                $engine,
+                $allocationPreview,
+                $trafficSync,
+                $detector,
+                $deviceDetection,
+                $snapshot,
+            );
+
+            return self::SUCCESS;
+        }
+
         $this->info('Bandwidth allocator started...');
 
         while (true) {
@@ -57,7 +76,7 @@ class RunBandwidthAllocator extends Command
         if (! $mikrotik->isReachable()) {
             $snapshot->publishOffline();
             $this->warn("MikroTik unreachable at {$mikrotik->connectionLabel()} — skipping until connected");
-            sleep(5);
+            $this->pause();
 
             return;
         }
@@ -237,7 +256,7 @@ class RunBandwidthAllocator extends Command
             }
             $this->warn('Pool is 0 Kbps — set monitor interface on dashboard or generate client traffic');
             $mikrotik->probeNextInterface($monitor);
-            sleep(5);
+            $this->pause();
 
             return;
         }
@@ -268,6 +287,13 @@ class RunBandwidthAllocator extends Command
         }
 
         $mikrotik->probeNextInterface($monitor);
-        sleep(5);
+        $this->pause();
+    }
+
+    protected function pause(): void
+    {
+        if ($this->pause) {
+            sleep(5);
+        }
     }
 }

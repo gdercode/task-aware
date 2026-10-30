@@ -21,6 +21,9 @@ Route::get('/test-mikrotik', function (MikrotikService $mikrotik) {
 
 Route::get('/', [DashboardController::class, 'index'])->name('dashboard');
 
+Route::post('/apply-changes', [DashboardController::class, 'applyChanges'])
+    ->name('bandwidth.apply');
+
 Route::get('/live-use', [DashboardController::class, 'liveUse'])->name('live-use');
 
 Route::post('/mikrotik-settings', [DashboardController::class, 'updateMikrotik'])

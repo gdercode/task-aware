@@ -13,6 +13,7 @@ use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\View\View;
 
 class DashboardController extends Controller
@@ -22,6 +23,29 @@ class DashboardController extends Controller
     public function index(AllocationSnapshotService $snapshot): View
     {
         return view('dashboard', $snapshot->forDashboard());
+    }
+
+    public function applyChanges(AllocationSnapshotService $snapshot): RedirectResponse
+    {
+        set_time_limit(180);
+
+        try {
+            Artisan::call('bandwidth:run', ['--once' => true]);
+        } catch (\Throwable $e) {
+            return redirect()
+                ->route('dashboard')
+                ->with('error', 'Changes were not applied. '.$e->getMessage());
+        }
+
+        if (! $snapshot->isLive()) {
+            return redirect()
+                ->route('dashboard')
+                ->with('error', 'The router is not reachable, so the new allocation was not applied.');
+        }
+
+        return redirect()
+            ->route('dashboard')
+            ->with('success', 'Changes applied. The dashboard and the router now use the current devices, roles, and allocations.');
     }
 
     public function liveUse(AllocationSnapshotService $snapshot): View

@@ -73,6 +73,12 @@
                         Allocator stopped
                     </span>
                 @endif
+                <form method="POST" action="{{ route('bandwidth.apply') }}" onsubmit="this.querySelector('button').disabled = true; this.querySelector('button').textContent = 'Applying...';">
+                    @csrf
+                    <button type="submit" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white text-sm font-medium transition-colors">
+                        Apply changes
+                    </button>
+                </form>
             </div>
         </div>
     </header>
@@ -81,6 +87,12 @@
         @if (session('success'))
             <div class="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
                 {{ session('success') }}
+            </div>
+        @endif
+
+        @if (session('error'))
+            <div class="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+                {{ session('error') }}
             </div>
         @endif
 
