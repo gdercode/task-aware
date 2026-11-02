@@ -30,6 +30,14 @@
                        ])>
                         Users
                     </a>
+                    <a href="{{ route('tasks.index') }}"
+                       @class([
+                           'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
+                           'bg-slate-800 text-white' => request()->routeIs('tasks.*'),
+                           'text-slate-400 hover:text-white hover:bg-slate-800/50' => !request()->routeIs('tasks.*'),
+                       ])>
+                        Tasks
+                    </a>
                     <a href="{{ route('roles.index') }}"
                        @class([
                            'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',

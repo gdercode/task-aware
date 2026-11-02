@@ -143,6 +143,52 @@ class TaskAwareAllocationTest extends TestCase
         $this->get('/roles')->assertOk()->assertSee('institutional importance');
     }
 
+    public function test_task_page_shows_destinations_and_saved_priority_changes_the_share(): void
+    {
+        $video = $this->makeUser('student', '10.0.0.30', 'REAL_TIME');
+        $learning = $this->makeUser('student', '10.0.0.31', 'LEARNING');
+        Flow::where('user_id', $video->id)->update(['destination' => 'zoom.us:443']);
+        Flow::where('user_id', $learning->id)->update(['destination' => 'moodle.university.edu:443']);
+
+        $this->get('/tasks')
+            ->assertOk()
+            ->assertSee('Video conferencing')
+            ->assertSee('zoom.us:443')
+            ->assertSee('moodle.university.edu:443');
+
+        $before = $this->allocatePair($video, $learning, 100, 100);
+        $this->assertGreaterThan($this->share($before, $learning), $this->share($before, $video));
+
+        $learningTask = \App\Models\TaskPriority::query()->where('slug', 'LEARNING')->firstOrFail();
+        $videoTask = \App\Models\TaskPriority::query()->where('slug', 'REAL_TIME')->firstOrFail();
+
+        $this->put('/tasks', [
+            'tasks' => [
+                $learningTask->id => [
+                    'name' => 'Online learning',
+                    'weight' => 40,
+                    'urgency' => 5,
+                    'is_critical' => '1',
+                    'match_terms' => 'moodle, canvas',
+                ],
+                $videoTask->id => [
+                    'name' => 'Video conferencing',
+                    'weight' => 1,
+                    'urgency' => 1,
+                    'match_terms' => 'zoom, teams',
+                ],
+            ],
+        ])->assertRedirect(route('tasks.index'));
+
+        $learningTask->refresh();
+        $this->assertSame(40, $learningTask->weight);
+        $this->assertSame('LEARNING', app(TrafficDetectionService::class)->classify('moodle.university.edu:443'));
+        $this->assertSame('NORMAL', app(TrafficDetectionService::class)->classify('whereby.com:443'));
+
+        $after = $this->allocatePair($video, $learning, 100, 100);
+        $this->assertGreaterThan($this->share($after, $video), $this->share($after, $learning));
+    }
+
     public function test_router_priority_follows_importance_score(): void
     {
         $priorities = app(ImportanceEngineService::class)->queuePriorities([
@@ -192,18 +238,26 @@ class TaskAwareAllocationTest extends TestCase
     /**
      * @return array<string, mixed>
      */
-    protected function allocate(User $student, User $dean, int $studentKbps, int $deanKbps): array
+    protected function allocatePair(User $first, User $second, int $firstKbps, int $secondKbps): array
     {
         return app(AllocationPreviewService::class)->build(10000, [
-            $student->ip_address => true,
-            $dean->ip_address => true,
+            $first->ip_address => true,
+            $second->ip_address => true,
         ], [
-            $student->id => ['download_kbps' => $studentKbps, 'upload_kbps' => 0, 'total_kbps' => $studentKbps],
-            $dean->id => ['download_kbps' => $deanKbps, 'upload_kbps' => 0, 'total_kbps' => $deanKbps],
+            $first->id => ['download_kbps' => $firstKbps, 'upload_kbps' => 0, 'total_kbps' => $firstKbps],
+            $second->id => ['download_kbps' => $secondKbps, 'upload_kbps' => 0, 'total_kbps' => $secondKbps],
         ], [
-            $student->ip_address => true,
-            $dean->ip_address => true,
+            $first->ip_address => true,
+            $second->ip_address => true,
         ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function allocate(User $student, User $dean, int $studentKbps, int $deanKbps): array
+    {
+        return $this->allocatePair($student, $dean, $studentKbps, $deanKbps);
     }
 
     /**

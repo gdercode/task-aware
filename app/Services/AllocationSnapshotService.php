@@ -139,6 +139,7 @@ class AllocationSnapshotService
             ->get();
 
         $allocation = $this->rehydrateAllocation($snapshot['allocation'], $users);
+        $this->attachDestinations($allocation['users']);
         [$activeUsers, $inactiveUsers] = $this->splitUsers($users, $allocation['users'], $connected);
 
         $stats = [
@@ -325,6 +326,33 @@ class AllocationSnapshotService
         );
 
         return array_merge($empty, $allocation, $summary);
+    }
+
+    /**
+     * @param  Collection<int, object>  $rows
+     */
+    protected function attachDestinations(Collection $rows): void
+    {
+        if ($rows->isEmpty()) {
+            return;
+        }
+
+        $flows = Flow::query()
+            ->where('is_active', true)
+            ->whereIn('user_id', $rows->map(fn ($row) => $row->user->id)->all())
+            ->orderByDesc('importance_score')
+            ->get()
+            ->groupBy('user_id');
+
+        foreach ($rows as $row) {
+            $userFlows = $flows->get($row->user->id, collect());
+            $task = (string) ($row->task_type ?? '');
+            $match = $userFlows->first(function ($flow) use ($task) {
+                return $task !== '' && (($flow->classification ?: $flow->task_type) === $task);
+            });
+
+            $row->destination = $match->destination ?? $userFlows->first()?->destination;
+        }
     }
 
     /**

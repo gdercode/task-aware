@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Role;
+use App\Models\TaskPriority;
 
 class ImportanceEngineService
 {
@@ -11,11 +12,23 @@ class ImportanceEngineService
 
     protected float $roleWeightsLoadedAt = 0;
 
-    protected $taskWeights = [
+    /** @var array<string, int> */
+    protected array $fallbackTaskWeights = [
         'REAL_TIME' => 8,
         'LEARNING' => 7,
         'COLLABORATION' => 5,
         'DATA_TRANSFER' => 4,
+        'STREAMING' => 2,
+        'NORMAL' => 2,
+        'BULK' => 1,
+    ];
+
+    /** @var array<string, int> */
+    protected array $fallbackUrgencies = [
+        'REAL_TIME' => 5,
+        'LEARNING' => 4,
+        'COLLABORATION' => 3,
+        'DATA_TRANSFER' => 3,
         'STREAMING' => 2,
         'NORMAL' => 2,
         'BULK' => 1,
@@ -29,7 +42,7 @@ class ImportanceEngineService
         }
 
         $taskWeight = $this->taskPriority((string) $taskType);
-        $maxTask = max($this->taskWeights) ?: 1;
+        $maxTask = max($this->taskWeightMap()) ?: 1;
         $urgency = max(1, min(5, (int) $urgency));
         $taskShare = $congested
             ? (float) config('bandwidth.congested_task_weight', 0.65)
@@ -44,30 +57,55 @@ class ImportanceEngineService
 
     public function taskPriority(string $taskType): int
     {
-        return $this->taskWeights[$taskType] ?? $this->taskWeights['NORMAL'];
+        $weights = $this->taskWeightMap();
+
+        return $weights[$taskType] ?? $weights['NORMAL'] ?? 2;
+    }
+
+    public function taskLabel(string $taskType): string
+    {
+        return TaskPriority::labelFor($taskType) ?? 'General use';
     }
 
     public function urgencyFor(string $taskType, int $bytes = 0): int
     {
-        $urgency = match ($taskType) {
-            'REAL_TIME' => 5,
-            'LEARNING' => 4,
-            'COLLABORATION', 'DATA_TRANSFER' => 3,
-            'STREAMING', 'NORMAL' => 2,
-            'BULK' => 1,
-            default => 2,
-        };
+        $urgencies = $this->urgencyMap();
+        $urgency = $urgencies[$taskType] ?? $urgencies['NORMAL'] ?? 2;
 
         if (in_array($taskType, ['BULK', 'STREAMING'], true) && $bytes >= 50_000_000) {
             return 1;
         }
 
-        return $urgency;
+        return max(1, min(5, (int) $urgency));
     }
 
     public function isCriticalTask(string $taskType): bool
     {
-        return in_array($taskType, ['REAL_TIME', 'LEARNING'], true);
+        if (TaskPriority::weights() === []) {
+            return in_array($taskType, ['REAL_TIME', 'LEARNING'], true);
+        }
+
+        return in_array($taskType, TaskPriority::criticalSlugs(), true);
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    protected function taskWeightMap(): array
+    {
+        $weights = TaskPriority::weights();
+
+        return $weights !== [] ? $weights : $this->fallbackTaskWeights;
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    protected function urgencyMap(): array
+    {
+        $urgencies = TaskPriority::urgencies();
+
+        return $urgencies !== [] ? $urgencies : $this->fallbackUrgencies;
     }
 
     /**

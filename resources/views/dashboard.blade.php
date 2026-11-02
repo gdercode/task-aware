@@ -187,7 +187,9 @@
                                     </td>
                                     <td class="px-5 py-3 text-slate-200">
                                         {{ $row->task_label ?? 'General use' }}
-                                        <span class="block text-xs text-slate-500">Urgency {{ (int) ($row->urgency ?? 0) }}</span>
+                                        <span class="block text-xs font-mono text-slate-500 truncate max-w-[220px]" title="{{ $row->destination ?? '' }}">
+                                            {{ $row->destination ?: 'No destination reported' }}
+                                        </span>
                                     </td>
                                     <td class="px-5 py-3 text-right font-mono text-sky-300">
                                         {{ number_format((int) ($row->throughput_total_kbps ?? 0)) }}

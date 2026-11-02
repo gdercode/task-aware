@@ -2,12 +2,37 @@
 
 namespace App\Services;
 
+use App\Models\TaskPriority;
+
 class TrafficDetectionService
 {
     public function classify($destination, $bytes = 0, $upload = false)
     {
-        $destination = strtolower($destination);
+        $destination = strtolower((string) $destination);
 
+        foreach (TaskPriority::matchers() as $slug => $terms) {
+            if ($this->matches($destination, $terms)) {
+                return $slug;
+            }
+        }
+
+        if (TaskPriority::matchers() === []) {
+            return $this->classifyWithDefaults($destination, $bytes, $upload);
+        }
+
+        if ($upload) {
+            return 'DATA_TRANSFER';
+        }
+
+        if ($bytes > 50000000) {
+            return 'BULK';
+        }
+
+        return 'NORMAL';
+    }
+
+    protected function classifyWithDefaults(string $destination, int $bytes, bool $upload): string
+    {
         if ($this->matches($destination, [
             'zoom', 'teams', 'meet.google', 'meet', 'webex', 'skype', 'jitsi',
             'bigbluebutton', 'whereby',

@@ -7,6 +7,7 @@ use App\Services\TrafficDetectionService;
 use App\Services\ImportanceEngineService;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\RoleController;
+use App\Http\Controllers\TaskPriorityController;
 use App\Http\Controllers\UserController;
 use App\Models\BandwidthLog;
 use App\Models\Flow;
@@ -38,6 +39,9 @@ Route::post('/devices/register', [UserController::class, 'registerFromRouter'])
 Route::resource('users', UserController::class)->except(['show']);
 
 Route::resource('roles', RoleController::class)->except(['show']);
+
+Route::get('/tasks', [TaskPriorityController::class, 'index'])->name('tasks.index');
+Route::put('/tasks', [TaskPriorityController::class, 'update'])->name('tasks.update');
 
 Route::get('/api/allocation-reports', function () {
     return BandwidthLog::with('user')

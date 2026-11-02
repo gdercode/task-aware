@@ -266,6 +266,7 @@ class AllocationPreviewService
                 'task_type' => $task['task'],
                 'urgency' => $task['urgency'],
                 'task_priority' => $task['priority'],
+                'destination' => $task['destination'] ?? null,
                 'is_online' => $presence['is_online'],
                 'using_bandwidth' => $presence['using_bandwidth'],
             ];
@@ -294,7 +295,7 @@ class AllocationPreviewService
 
     /**
      * @param  Collection<int, Flow>  $flows
-     * @return array{task: string, urgency: int, priority: int}
+     * @return array{task: string, urgency: int, priority: int, destination: ?string}
      */
     protected function dominantTask(User $user, Collection $flows, bool $congested): array
     {
@@ -303,10 +304,7 @@ class AllocationPreviewService
 
         foreach ($flows as $flow) {
             $task = $flow->classification ?: $flow->task_type ?: 'NORMAL';
-            $urgency = (int) ($flow->urgency_weight ?? 0);
-            if ($urgency < 1) {
-                $urgency = $this->engine->urgencyFor($task, (int) $flow->bytes);
-            }
+            $urgency = $this->engine->urgencyFor($task, (int) $flow->bytes);
 
             $score = $this->engine->calculate($user->role, $task, $urgency, $congested);
             if ($score > $bestScore) {
@@ -315,6 +313,7 @@ class AllocationPreviewService
                     'task' => $task,
                     'urgency' => $urgency,
                     'priority' => $this->engine->taskPriority($task),
+                    'destination' => $flow->destination,
                 ];
             }
         }
@@ -329,6 +328,7 @@ class AllocationPreviewService
             'task' => $task,
             'urgency' => $this->engine->urgencyFor($task),
             'priority' => $this->engine->taskPriority($task),
+            'destination' => null,
         ];
     }
 
@@ -379,6 +379,7 @@ class AllocationPreviewService
                 'task_type' => $entry['task_type'],
                 'urgency' => $entry['urgency'],
                 'task_priority' => $entry['task_priority'],
+                'destination' => $entry['destination'] ?? null,
                 'is_online' => $entry['is_online'],
                 'using_bandwidth' => $entry['using_bandwidth'],
                 'share_percent' => $sharePercent,
@@ -419,33 +420,35 @@ class AllocationPreviewService
      */
     protected function taskCopy(string $taskType): array
     {
+        $label = $this->engine->taskLabel($taskType);
+
         return match ($taskType) {
             'REAL_TIME' => [
-                'label' => 'Video conferencing',
+                'label' => $label !== 'General use' ? $label : 'Video conferencing',
                 'effect' => 'High task priority and urgency. Protected while the network is congested.',
             ],
             'LEARNING' => [
-                'label' => 'Online learning',
+                'label' => $label !== 'General use' ? $label : 'Online learning',
                 'effect' => 'High institutional priority. Kept above bulk traffic during congestion.',
             ],
             'COLLABORATION' => [
-                'label' => 'Digital collaboration',
+                'label' => $label !== 'General use' ? $label : 'Digital collaboration',
                 'effect' => 'Cloud and collaboration traffic is ranked above general use.',
             ],
             'DATA_TRANSFER' => [
-                'label' => 'Data transfer',
+                'label' => $label !== 'General use' ? $label : 'Data transfer',
                 'effect' => 'Medium priority from the task and its urgency.',
             ],
             'STREAMING' => [
-                'label' => 'Streaming',
+                'label' => $label !== 'General use' ? $label : 'Streaming',
                 'effect' => 'Yields bandwidth when critical activities need the link.',
             ],
             'BULK' => [
-                'label' => 'Bulk download',
+                'label' => $label !== 'General use' ? $label : 'Bulk download',
                 'effect' => 'Lowest priority. Capped while the network is congested.',
             ],
             default => [
-                'label' => 'General use',
+                'label' => $label,
                 'effect' => 'Share follows role, task priority, and urgency.',
             ],
         };
