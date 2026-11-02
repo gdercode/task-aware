@@ -199,6 +199,15 @@ class TaskAwareAllocationTest extends TestCase
         $this->assertLessThan($priorities[2], $priorities[1]);
     }
 
+    public function test_live_snapshot_is_saved_in_the_database(): void
+    {
+        \Illuminate\Support\Facades\Cache::store('database')->flush();
+
+        app(\App\Services\AllocationSnapshotService::class)->publishOffline();
+
+        $this->assertNotNull(\Illuminate\Support\Facades\Cache::store('database')->get('bandwidth.live_snapshot'));
+    }
+
     /**
      * @return array{0: User, 1: User}
      */

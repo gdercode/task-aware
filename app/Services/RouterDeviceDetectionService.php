@@ -249,7 +249,7 @@ class RouterDeviceDetectionService
      */
     protected function mergeRememberedDevices(array $devices, $byIp, $byMac): array
     {
-        $memory = Cache::store('file')->get($this->presenceCacheKey(), []);
+        $memory = Cache::store('database')->get($this->presenceCacheKey(), []);
         if (! is_array($memory)) {
             $memory = [];
         }
@@ -309,7 +309,7 @@ class RouterDeviceDetectionService
             ];
         }
 
-        Cache::store('file')->forever($this->presenceCacheKey(), $memory);
+        Cache::store('database')->forever($this->presenceCacheKey(), $memory);
 
         usort($devices, function (array $a, array $b) {
             if (($a['using_bandwidth'] ?? false) !== ($b['using_bandwidth'] ?? false)) {

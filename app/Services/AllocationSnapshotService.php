@@ -197,7 +197,7 @@ class AllocationSnapshotService
      */
     public function read(): array
     {
-        $raw = Cache::store('file')->get(self::KEY);
+        $raw = Cache::store('database')->get(self::KEY);
 
         if (! is_array($raw) || empty($raw['measured_at'])) {
             return $this->blank();
@@ -233,7 +233,7 @@ class AllocationSnapshotService
     {
         $payload['measured_at'] = now()->toIso8601String();
 
-        Cache::store('file')->forever(self::KEY, $payload);
+        Cache::store('database')->forever(self::KEY, $payload);
     }
 
     /**

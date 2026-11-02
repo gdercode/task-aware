@@ -139,10 +139,10 @@ class RunBandwidthAllocator extends Command
         }
 
         $poolMeasure = $mikrotik->poolFromMeasurements($interfaceKbps, $interfaceError, $connections);
-        $peakKbps = (int) Cache::store('file')->get('bandwidth.pool_peak_directional_kbps', 0);
+        $peakKbps = (int) Cache::store('database')->get('bandwidth.pool_peak_directional_kbps', 0);
         if ($poolMeasure['kbps'] > $peakKbps) {
             $peakKbps = $poolMeasure['kbps'];
-            Cache::store('file')->put('bandwidth.pool_peak_directional_kbps', $peakKbps, now()->addHours(6));
+            Cache::store('database')->put('bandwidth.pool_peak_directional_kbps', $peakKbps, now()->addHours(6));
         }
         $poolMeasure['kbps'] = max($poolMeasure['kbps'], $peakKbps);
         $interfaceTraffic = $mikrotik->interfaceTrafficSnapshot($monitor, $interfaceError ? null : $interfaceKbps);

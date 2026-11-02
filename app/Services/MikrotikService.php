@@ -400,7 +400,7 @@ class MikrotikService
      */
     protected function breakExistingFasttrack(array $assignments, array $queues, array $connections): void
     {
-        $shaped = Cache::store('file')->get('bandwidth.shaped_ips', []);
+        $shaped = Cache::store('database')->get('bandwidth.shaped_ips', []);
         if (! is_array($shaped)) {
             $shaped = [];
         }
@@ -438,7 +438,7 @@ class MikrotikService
             $shaped[$ip] = true;
         }
 
-        Cache::store('file')->forever('bandwidth.shaped_ips', $shaped);
+        Cache::store('database')->forever('bandwidth.shaped_ips', $shaped);
 
         if ($reset !== []) {
             $this->removeConnectionsFor($reset, $connections);
@@ -447,7 +447,7 @@ class MikrotikService
 
     protected function recentlyReset(string $ip): bool
     {
-        $resetAt = Cache::store('file')->get('bandwidth.queue_reset_at', []);
+        $resetAt = Cache::store('database')->get('bandwidth.queue_reset_at', []);
         $last = (int) (is_array($resetAt) ? ($resetAt[$ip] ?? 0) : 0);
 
         return $last > 0 && (time() - $last) < (int) config('bandwidth.rebalance_seconds', 45);
@@ -455,13 +455,13 @@ class MikrotikService
 
     protected function rememberReset(string $ip): void
     {
-        $resetAt = Cache::store('file')->get('bandwidth.queue_reset_at', []);
+        $resetAt = Cache::store('database')->get('bandwidth.queue_reset_at', []);
         if (! is_array($resetAt)) {
             $resetAt = [];
         }
 
         $resetAt[$ip] = time();
-        Cache::store('file')->put('bandwidth.queue_reset_at', $resetAt, now()->addHour());
+        Cache::store('database')->put('bandwidth.queue_reset_at', $resetAt, now()->addHour());
     }
 
     /**
@@ -747,7 +747,7 @@ class MikrotikService
             $this->resetClient();
         }
 
-        $cached = Cache::store('file')->get('bandwidth.interface_kbps', []);
+        $cached = Cache::store('database')->get('bandwidth.interface_kbps', []);
         if (! is_array($cached)) {
             $cached = [];
         }
@@ -760,7 +760,7 @@ class MikrotikService
             $cached = array_intersect_key($cached, array_flip(array_merge($names, [$monitor])));
         }
 
-        Cache::store('file')->put('bandwidth.interface_kbps', $cached, now()->addHour());
+        Cache::store('database')->put('bandwidth.interface_kbps', $cached, now()->addHour());
 
         $listNames = $names !== [] ? $names : array_keys($cached);
         $samples = [];
@@ -796,9 +796,9 @@ class MikrotikService
             return;
         }
 
-        $index = (int) Cache::store('file')->get('bandwidth.interface_rr', 0);
+        $index = (int) Cache::store('database')->get('bandwidth.interface_rr', 0);
         $name = $others[$index % count($others)];
-        Cache::store('file')->put('bandwidth.interface_rr', $index + 1, now()->addHour());
+        Cache::store('database')->put('bandwidth.interface_rr', $index + 1, now()->addHour());
 
         try {
             $kbps = $this->measureFromInterface($name);
@@ -807,13 +807,13 @@ class MikrotikService
             $kbps = null;
         }
 
-        $cached = Cache::store('file')->get('bandwidth.interface_kbps', []);
+        $cached = Cache::store('database')->get('bandwidth.interface_kbps', []);
         if (! is_array($cached)) {
             $cached = [];
         }
 
         $cached[$name] = $kbps;
-        Cache::store('file')->put('bandwidth.interface_kbps', $cached, now()->addHour());
+        Cache::store('database')->put('bandwidth.interface_kbps', $cached, now()->addHour());
     }
 
     /**
