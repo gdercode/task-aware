@@ -9,7 +9,7 @@
             <div>
                 <p class="text-xs font-medium uppercase tracking-wider text-emerald-400">Management</p>
                 <h1 class="text-xl sm:text-2xl font-semibold text-white">Roles</h1>
-                <p class="text-sm text-slate-400 mt-1">Each percentage is the institutional importance of that role. The allocator combines it with task priority and urgency, and protects critical activities when the network is congested.</p>
+                <p class="text-sm text-slate-400 mt-1">Each percentage is the institutional importance of that role. It is the role weight in priority = role + task + urgency + failure risk.</p>
             </div>
             <a href="{{ route('roles.create') }}"
                class="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium transition-colors">

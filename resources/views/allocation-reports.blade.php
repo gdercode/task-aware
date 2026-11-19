@@ -30,13 +30,13 @@
                     <div class="flex gap-3 self-start">
                         @if ($score !== null)
                             <div class="rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-2 text-center">
-                                <p class="text-xs text-slate-400">Score</p>
+                                <p class="text-xs text-slate-400">Pi</p>
                                 <p class="font-mono text-lg font-semibold text-amber-400">{{ $score }}</p>
                             </div>
                         @endif
                         @if ($bandwidth)
                             <div class="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-4 py-2 text-center">
-                                <p class="text-xs text-slate-400">Bandwidth</p>
+                                <p class="text-xs text-slate-400">Bi</p>
                                 <p class="font-mono text-lg font-semibold text-emerald-400">{{ $bandwidth }}</p>
                                 @if ($latestLog)
                                     <p class="text-xs text-slate-500 mt-0.5">{{ $latestLog->created_at->format('M j, H:i:s') }}</p>
@@ -67,8 +67,8 @@
                             <tr class="text-left text-slate-400 border-b border-slate-800">
                                 <th class="px-5 py-3 font-medium">Task</th>
                                 <th class="px-5 py-3 font-medium">Destination</th>
-                                <th class="px-5 py-3 font-medium text-right">Score</th>
-                                <th class="px-5 py-3 font-medium text-right">Bandwidth</th>
+                                <th class="px-5 py-3 font-medium text-right">Pi</th>
+                                <th class="px-5 py-3 font-medium text-right">Bi</th>
                                 <th class="px-5 py-3 font-medium text-right">Bytes</th>
                             </tr>
                         </thead>
@@ -139,8 +139,8 @@
                             <tr class="text-left text-slate-400 border-b border-slate-800">
                                 <th class="px-5 py-3 font-medium">Time</th>
                                 <th class="px-5 py-3 font-medium">Task Type</th>
-                                <th class="px-5 py-3 font-medium text-right">Score</th>
-                                <th class="px-5 py-3 font-medium text-right">Allocated</th>
+                                <th class="px-5 py-3 font-medium text-right">Pi</th>
+                                <th class="px-5 py-3 font-medium text-right">Bi</th>
                                 <th class="px-5 py-3 font-medium text-right">Pool Available</th>
                             </tr>
                         </thead>

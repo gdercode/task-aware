@@ -18,7 +18,12 @@
 @php
     $live = $reportState === 'live';
     $congested = $live && (bool) ($allocation['congested'] ?? false);
+    $phase = $allocation['allocation_phase'] ?? 'normal';
+    $restoring = $live && $phase === 'restoring';
     $utilization = (int) ($allocation['utilization_percent'] ?? 0);
+    $threshold = (int) ($allocation['congestion_threshold_percent'] ?? 70);
+    $streak = (int) ($allocation['allocation_streak'] ?? 0);
+    $intervals = (int) ($allocation['allocation_intervals'] ?? 2);
     $receiving = $activeUsers->sortByDesc(fn ($row) => (int) ($row->share_kbps ?? 0))->values();
     $listedUserIds = [];
     foreach ($receiving as $row) {
@@ -113,15 +118,15 @@
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <div @class([
                 'rounded-xl border p-5',
-                'border-amber-500/40 bg-amber-500/10' => $congested,
-                'border-slate-800 bg-slate-900' => ! $congested,
+                'border-amber-500/40 bg-amber-500/10' => $congested || $restoring,
+                'border-slate-800 bg-slate-900' => ! $congested && ! $restoring,
             ])>
                 <p class="text-sm text-slate-400">Network</p>
-                <p @class(['mt-1 text-2xl font-semibold', 'text-amber-200' => $congested, 'text-white' => ! $congested])>
+                <p @class(['mt-1 text-2xl font-semibold', 'text-amber-200' => $congested || $restoring, 'text-white' => ! $congested && ! $restoring])>
                     {{ $live ? ($allocation['congestion_label'] ?? 'Stable') : '—' }}
                 </p>
                 <p class="text-xs text-slate-500 mt-1">
-                    {{ $live ? $utilization.'% of capacity in use' : 'No live report' }}
+                    U(t) {{ $live ? $utilization.'%' : '—' }} · Tc {{ $threshold }}% · {{ $live ? $streak.'/'.$intervals : '—' }}
                 </p>
             </div>
             <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">
@@ -150,8 +155,7 @@
 
         <section class="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden">
             <div class="px-5 py-4 border-b border-slate-800">
-                <h2 class="text-lg font-semibold text-white">Allocations</h2>
-                <p class="text-sm text-slate-400 mt-1">A computer with a share can use the link. One that is not registered stays on this list with no share, and its internet is blocked.</p>
+                <h2 class="text-lg font-semibold text-white">Allocation</h2>
             </div>
             @if ($receiving->isEmpty() && $alsoUsing === [])
                 <p class="px-5 py-10 text-sm text-slate-500 text-center">
@@ -165,8 +169,13 @@
                                 <th class="px-5 py-3 font-medium">Device</th>
                                 <th class="px-5 py-3 font-medium">Role</th>
                                 <th class="px-5 py-3 font-medium">Task</th>
+                                <th class="px-5 py-3 font-medium text-right">Ri</th>
+                                <th class="px-5 py-3 font-medium text-right">Ti</th>
+                                <th class="px-5 py-3 font-medium text-right">Ui</th>
+                                <th class="px-5 py-3 font-medium text-right">Fi</th>
+                                <th class="px-5 py-3 font-medium text-right">Pi</th>
                                 <th class="px-5 py-3 font-medium text-right">In use</th>
-                                <th class="px-5 py-3 font-medium text-right">Allocated</th>
+                                <th class="px-5 py-3 font-medium text-right">Bi</th>
                                 <th class="px-5 py-3 font-medium">Share</th>
                             </tr>
                         </thead>
@@ -187,10 +196,12 @@
                                     </td>
                                     <td class="px-5 py-3 text-slate-200">
                                         {{ $row->task_label ?? 'General use' }}
-                                        <span class="block text-xs font-mono text-slate-500 truncate max-w-[220px]" title="{{ $row->destination ?? '' }}">
-                                            {{ $row->destination ?: 'No destination reported' }}
-                                        </span>
                                     </td>
+                                    <td class="px-5 py-3 text-right font-mono text-slate-300">{{ isset($row->role_weight) ? (int) $row->role_weight : '—' }}</td>
+                                    <td class="px-5 py-3 text-right font-mono text-slate-300">{{ isset($row->task_weight) ? (int) $row->task_weight : '—' }}</td>
+                                    <td class="px-5 py-3 text-right font-mono text-slate-300">{{ isset($row->urgency_weight) ? (int) $row->urgency_weight : '—' }}</td>
+                                    <td class="px-5 py-3 text-right font-mono text-slate-300">{{ isset($row->failure_risk) ? (int) $row->failure_risk : '—' }}</td>
+                                    <td class="px-5 py-3 text-right font-mono text-amber-300">{{ number_format((int) ($row->score ?? 0)) }}</td>
                                     <td class="px-5 py-3 text-right font-mono text-sky-300">
                                         {{ number_format((int) ($row->throughput_total_kbps ?? 0)) }}
                                     </td>
@@ -217,6 +228,11 @@
                                         <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/20 text-red-300">Not registered</span>
                                     </td>
                                     <td class="px-5 py-3 text-slate-400">No share</td>
+                                    <td class="px-5 py-3 text-right font-mono text-slate-500">—</td>
+                                    <td class="px-5 py-3 text-right font-mono text-slate-500">—</td>
+                                    <td class="px-5 py-3 text-right font-mono text-slate-500">—</td>
+                                    <td class="px-5 py-3 text-right font-mono text-slate-500">—</td>
+                                    <td class="px-5 py-3 text-right font-mono text-slate-500">0</td>
                                     <td class="px-5 py-3 text-right font-mono text-sky-300">
                                         {{ number_format((int) ($device['rate_kbps'] ?? 0)) }}
                                     </td>

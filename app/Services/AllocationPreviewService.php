@@ -60,6 +60,7 @@ class AllocationPreviewService
         }
 
         $congestion = $this->engine->assessCongestion($poolKbps, $throughputKbps, $competingUsers);
+        $decision = $this->engine->advanceAllocationState($congestion['utilization_percent']);
         $entries = $this->buildEntries($monitoredUsers, $onlineIps, $activeIps, $flowsByUser, $congestion['congested']);
 
         $allocatableScores = collect($entries)
@@ -67,7 +68,6 @@ class AllocationPreviewService
             ->mapWithKeys(fn ($entry, $userId) => [$userId => $entry['effective_score']])
             ->all();
 
-        $totalScore = array_sum($allocatableScores);
         $poolUsingFallback = $measuredPoolKbps <= 0 && $poolKbps > 0;
         $context = [];
         foreach ($entries as $userId => $entry) {
@@ -76,37 +76,16 @@ class AllocationPreviewService
                 'active' => $entry['activity_status'] === 'active' || $entry['using_bandwidth'],
             ];
         }
-        $rawShares = $this->engine->distributePool($allocatableScores, $poolKbps);
-        $usedKbps = [];
+        $baseShares = $this->engine->distributePool($allocatableScores, $poolKbps);
+        $priorities = $this->engine->applyCongestionResponse($allocatableScores, $context, $decision['pressure']);
         foreach ($entries as $userId => $entry) {
-            $usedKbps[$userId] = (int) ($userThroughput[$userId]['total_kbps'] ?? 0);
+            $entries[$userId]['adjusted_score'] = (int) ($priorities[$userId] ?? 0);
         }
-        $distribution = $this->engine->shapeShares($allocatableScores, $context, $poolKbps, $congestion['congested']);
-        $distribution = $this->engine->releaseUnused(
-            $distribution,
-            $usedKbps,
-            $allocatableScores,
-            $context,
-            $congestion['congested'],
-        );
+        $totalScore = array_sum($priorities);
+        $distribution = $this->engine->distributePool($priorities, $poolKbps);
         $pulledBack = [];
-        $tightDownload = false;
-        foreach ($distribution as $userId => $kbps) {
-            $share = (int) $kbps;
-            $used = (int) ($usedKbps[$userId] ?? 0);
-            if ($share > 0 && $used > (int) config('bandwidth.spare_idle_kbps', 256) && ($used / $share) >= (float) config('bandwidth.tight_use_ratio', 0.8)) {
-                $tightDownload = true;
-            }
-        }
-        foreach ($rawShares as $userId => $kbps) {
-            $share = (int) ($distribution[$userId] ?? 0);
-            $used = (int) ($usedKbps[$userId] ?? 0);
-            $reduced = $share < (int) $kbps;
-            $stuckBelowShare = $tightDownload
-                && $share > 0
-                && $used > (int) config('bandwidth.spare_idle_kbps', 256)
-                && ($used / $share) < (float) config('bandwidth.spare_use_ratio', 0.5);
-            if ($reduced || $stuckBelowShare) {
+        foreach ($baseShares as $userId => $kbps) {
+            if ((int) ($distribution[$userId] ?? 0) < (int) $kbps) {
                 $pulledBack[$userId] = true;
             }
         }
@@ -138,12 +117,16 @@ class AllocationPreviewService
             ],
             'users' => $rows,
             'congested' => $congestion['congested'],
-            'congestion_label' => $congestion['label'],
+            'congestion_label' => $decision['phase'] === 'restoring' ? 'Restoring' : $congestion['label'],
             'utilization_percent' => $congestion['utilization_percent'],
             'capacity_kbps' => $congestion['capacity_kbps'],
             'capacity_source' => $congestion['capacity_source'],
             'competing_users' => $congestion['competing_users'],
             'congestion_threshold_percent' => $congestion['threshold_percent'],
+            'allocation_phase' => $decision['phase'],
+            'allocation_pressure' => $decision['pressure'],
+            'allocation_streak' => $decision['streak'],
+            'allocation_intervals' => $decision['required_intervals'],
         ] + $usageSummary;
     }
 
@@ -252,7 +235,8 @@ class AllocationPreviewService
         foreach ($monitoredUsers as $user) {
             $presence = $this->presence($user, $onlineIps, $activeIps);
             $task = $this->dominantTask($user, $flowsByUser->get($user->id, collect()), $congested);
-            $baseScore = $this->engine->calculate($user->role, $task['task'], $task['urgency'], $congested);
+            $weights = $this->engine->weights((string) $user->role, $task['task'], $task['urgency']);
+            $baseScore = $weights['priority'];
             $effectiveScore = $presence['is_online']
                 ? $this->engine->effectiveScore($baseScore, $presence['activity_status'], (string) $user->role)
                 : 0;
@@ -260,8 +244,13 @@ class AllocationPreviewService
             $entries[$user->id] = [
                 'user' => $user,
                 'base_score' => $baseScore,
+                'role_weight' => $weights['role'],
+                'task_weight' => $weights['task'],
+                'urgency_weight' => $weights['urgency'],
+                'failure_risk' => $weights['failure'],
                 'role_percentage' => $presence['role_percentage'],
                 'effective_score' => $effectiveScore,
+                'adjusted_score' => $effectiveScore,
                 'activity_status' => $presence['activity_status'],
                 'task_type' => $task['task'],
                 'urgency' => $task['urgency'],
@@ -342,7 +331,7 @@ class AllocationPreviewService
         $rows = collect();
 
         foreach ($entries as $userId => $entry) {
-            $shareKbps = ($entry['effective_score'] > 0) ? ($distribution[$userId] ?? 0) : 0;
+            $shareKbps = ($entry['adjusted_score'] > 0) ? ($distribution[$userId] ?? 0) : 0;
             $sharePercent = ($poolKbps > 0 && $shareKbps > 0)
                 ? round(($shareKbps / $poolKbps) * 100, 1)
                 : 0;
@@ -371,8 +360,12 @@ class AllocationPreviewService
 
             $rows->push((object) array_merge($impact, [
                 'user' => $entry['user'],
-                'score' => $entry['effective_score'],
+                'score' => $entry['adjusted_score'],
                 'base_score' => $entry['base_score'],
+                'role_weight' => $entry['role_weight'],
+                'task_weight' => $entry['task_weight'],
+                'urgency_weight' => $entry['urgency_weight'],
+                'failure_risk' => $entry['failure_risk'],
                 'role_percentage' => $entry['role_percentage'],
                 'activity_status' => $entry['activity_status'],
                 'activity_label' => $this->activity->activityLabel($entry['activity_status']),
@@ -425,31 +418,31 @@ class AllocationPreviewService
         return match ($taskType) {
             'REAL_TIME' => [
                 'label' => $label !== 'General use' ? $label : 'Video conferencing',
-                'effect' => 'High task priority and urgency. Protected while the network is congested.',
+                'effect' => 'Critical. Failure risk is high, so this priority is raised while congestion holds.',
             ],
             'LEARNING' => [
                 'label' => $label !== 'General use' ? $label : 'Online learning',
-                'effect' => 'High institutional priority. Kept above bulk traffic during congestion.',
+                'effect' => 'Critical. Kept ahead of best-effort traffic while congestion holds.',
             ],
             'COLLABORATION' => [
                 'label' => $label !== 'General use' ? $label : 'Digital collaboration',
-                'effect' => 'Cloud and collaboration traffic is ranked above general use.',
+                'effect' => 'Important. Its share follows role, task, urgency, and failure risk.',
             ],
             'DATA_TRANSFER' => [
                 'label' => $label !== 'General use' ? $label : 'Data transfer',
-                'effect' => 'Medium priority from the task and its urgency.',
+                'effect' => 'Important. Its share follows role, task, urgency, and failure risk.',
             ],
             'STREAMING' => [
                 'label' => $label !== 'General use' ? $label : 'Streaming',
-                'effect' => 'Yields bandwidth when critical activities need the link.',
+                'effect' => 'Best-effort. Reduced while congestion holds, and still given a minimum share.',
             ],
             'BULK' => [
                 'label' => $label !== 'General use' ? $label : 'Bulk download',
-                'effect' => 'Lowest priority. Capped while the network is congested.',
+                'effect' => 'Best-effort. Reduced while congestion holds, and still given a minimum share.',
             ],
             default => [
                 'label' => $label,
-                'effect' => 'Share follows role, task priority, and urgency.',
+                'effect' => 'Share follows role + task + urgency + failure risk.',
             ],
         };
     }

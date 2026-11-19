@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Role;
 use App\Models\TaskPriority;
+use Illuminate\Support\Facades\Cache;
 
 class ImportanceEngineService
 {
@@ -34,25 +35,54 @@ class ImportanceEngineService
         'BULK' => 1,
     ];
 
-    public function calculate($userRole, $taskType, $urgency = 1, bool $congested = false): int
+    /** @var array<string, int> */
+    protected array $fallbackFailureRisks = [
+        'REAL_TIME' => 5,
+        'LEARNING' => 4,
+        'COLLABORATION' => 3,
+        'DATA_TRANSFER' => 2,
+        'STREAMING' => 1,
+        'NORMAL' => 2,
+        'BULK' => 1,
+    ];
+
+    /**
+     * Base priority Pi = Ri + Ti + Ui + Fi.
+     * Congestion does not change this sum. Sustained congestion adjusts Pi later.
+     *
+     * @return array{role: int, task: int, urgency: int, failure: int, priority: int}
+     */
+    public function weights(string $userRole, string $taskType, ?int $urgency = null): array
     {
-        $rolePercent = $this->roleScore((string) $userRole);
-        if ($rolePercent <= 0) {
-            return 0;
+        $role = $this->roleScore($userRole);
+        if ($role <= 0) {
+            return [
+                'role' => 0,
+                'task' => 0,
+                'urgency' => 0,
+                'failure' => 0,
+                'priority' => 0,
+            ];
         }
 
-        $taskWeight = $this->taskPriority((string) $taskType);
-        $maxTask = max($this->taskWeightMap()) ?: 1;
-        $urgency = max(1, min(5, (int) $urgency));
-        $taskShare = $congested
-            ? (float) config('bandwidth.congested_task_weight', 0.65)
-            : (float) config('bandwidth.calm_task_weight', 0.35);
-        $taskShare = max(0.0, min(1.0, $taskShare));
+        $task = $this->taskPriority($taskType);
+        $urgency = $urgency === null
+            ? $this->urgencyFor($taskType)
+            : max(1, min(5, $urgency));
+        $failure = $this->failureRisk($taskType);
 
-        $blended = ((1 - $taskShare) * ($rolePercent / 100))
-            + ($taskShare * ($taskWeight / $maxTask) * ($urgency / 5));
+        return [
+            'role' => $role,
+            'task' => $task,
+            'urgency' => $urgency,
+            'failure' => $failure,
+            'priority' => $role + $task + $urgency + $failure,
+        ];
+    }
 
-        return (int) max(1, round($blended * 1000));
+    public function calculate($userRole, $taskType, $urgency = 1, bool $congested = false): int
+    {
+        return $this->weights((string) $userRole, (string) $taskType, (int) $urgency)['priority'];
     }
 
     public function taskPriority(string $taskType): int
@@ -86,6 +116,114 @@ class ImportanceEngineService
         }
 
         return in_array($taskType, TaskPriority::criticalSlugs(), true);
+    }
+
+    public function failureRisk(string $taskType): int
+    {
+        $risks = TaskPriority::failureRisks();
+        if ($risks === []) {
+            $risks = $this->fallbackFailureRisks;
+        }
+
+        return max(1, (int) ($risks[$taskType] ?? $risks['NORMAL'] ?? 1));
+    }
+
+    public function isLowPriorityTask(string $taskType): bool
+    {
+        if ($this->isCriticalTask($taskType)) {
+            return false;
+        }
+
+        return in_array($taskType, ['BULK', 'STREAMING'], true);
+    }
+
+    /**
+     * One monitoring interval. Utilization must stay at or above Tc for consecutive
+     * intervals before critical tasks are raised. Otherwise the response steps back.
+     *
+     * @return array{
+     *     streak: int,
+     *     pressure: float,
+     *     phase: string,
+     *     above_threshold: bool,
+     *     required_intervals: int,
+     *     threshold_percent: int
+     * }
+     */
+    public function advanceAllocationState(int $utilizationPercent): array
+    {
+        $threshold = (int) config('bandwidth.congestion_percent', 70);
+        $required = max(1, (int) config('bandwidth.congestion_intervals', 2));
+        $restore = (float) config('bandwidth.restore_step', 0.25);
+        $restore = max(0.05, min(1.0, $restore));
+
+        $stored = Cache::store('database')->get('bandwidth.allocation_state', []);
+        $pressure = (float) (is_array($stored) ? ($stored['pressure'] ?? 0) : 0);
+        $above = $utilizationPercent >= $threshold;
+        $streak = $above ? ((int) (is_array($stored) ? ($stored['streak'] ?? 0) : 0)) + 1 : 0;
+
+        if ($streak >= $required) {
+            $pressure = 1.0;
+            $phase = 'protecting';
+        } else {
+            $pressure = max(0.0, $pressure - $restore);
+            $phase = $pressure > 0 ? 'restoring' : 'normal';
+        }
+
+        $state = [
+            'streak' => $streak,
+            'pressure' => $pressure,
+            'phase' => $phase,
+            'above_threshold' => $above,
+            'required_intervals' => $required,
+            'threshold_percent' => $threshold,
+        ];
+
+        Cache::store('database')->put('bandwidth.allocation_state', $state, now()->addHours(6));
+
+        return $state;
+    }
+
+    /**
+     * While the congestion response is active, raise critical priorities and
+     * shrink best-effort priorities. Best-effort tasks keep a fraction of Pi.
+     *
+     * @param  array<int|string, int>  $scores
+     * @param  array<int|string, array{task?: string}>  $context
+     * @return array<int|string, int>
+     */
+    public function applyCongestionResponse(array $scores, array $context, float $pressure): array
+    {
+        $pressure = max(0.0, min(1.0, $pressure));
+        if ($pressure <= 0.0 || $scores === []) {
+            return $scores;
+        }
+
+        $boost = max(0.0, (float) config('bandwidth.critical_priority_boost', 1));
+        $keep = (float) config('bandwidth.low_priority_keep', 0.25);
+        $keep = max(0.05, min(1.0, $keep));
+        $adjusted = [];
+
+        foreach ($scores as $id => $score) {
+            $score = (int) $score;
+            if ($score <= 0) {
+                $adjusted[$id] = 0;
+
+                continue;
+            }
+
+            $task = (string) ($context[$id]['task'] ?? 'NORMAL');
+            $factor = 1.0;
+            if ($this->isCriticalTask($task)) {
+                $factor = 1 + ($pressure * $boost);
+            } elseif ($this->isLowPriorityTask($task)) {
+                $factor = 1 - ($pressure * (1 - $keep));
+            }
+
+            $adjusted[$id] = max(1, (int) round($score * $factor));
+        }
+
+        return $adjusted;
     }
 
     /**
@@ -127,7 +265,7 @@ class ImportanceEngineService
             ? (int) round(($throughputKbps / $capacity) * 100)
             : 0;
         $threshold = (int) config('bandwidth.congestion_percent', 70);
-        $congested = $competingUsers >= 2 && $capacity > 0 && $percent >= $threshold;
+        $congested = $capacity > 0 && $percent >= $threshold;
 
         return [
             'congested' => $congested,

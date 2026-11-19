@@ -20,11 +20,13 @@
             </span>
         </p>
         <p class="text-xs text-slate-500 mt-2">
-            Each queue is the device's share of the pool after role, task priority, and urgency are combined.
-            @if ($allocation['congested'] ?? false)
-                The network is congested, so video conferencing and online learning are protected and bulk or streaming traffic is capped.
+            Each queue is Bi = (Pi / ΣPi) × pool, where Pi is role + task + urgency + failure risk.
+            @if (($allocation['allocation_phase'] ?? '') === 'protecting')
+                Utilization has stayed high, so critical tasks are raised and best-effort traffic is reduced.
+            @elseif (($allocation['allocation_phase'] ?? '') === 'restoring')
+                Utilization has fallen. Normal shares are being restored interval by interval.
             @else
-                The network is stable, so lower-priority work still receives a usable share.
+                Shares follow the base priorities.
             @endif
             When live use fills a queue, that limit holds the extra traffic back.
         </p>
@@ -85,9 +87,8 @@
                                 <span class="text-white">{{ $row->task_label ?? ($row->task_type ?: 'General use') }}</span>
                                 <span class="block text-xs text-slate-500 mt-0.5">{{ $row->task_effect ?? $row->activity_label }}</span>
                                 <span class="block text-xs text-slate-600 mt-0.5">
-                                    Role {{ (int) ($row->role_percentage ?? 0) }}%
-                                    · urgency {{ (int) ($row->urgency ?? 0) }}
-                                    · score {{ number_format((int) ($row->score ?? 0)) }}
+                                    {{ (int) ($row->role_weight ?? 0) }} + {{ (int) ($row->task_weight ?? 0) }} + {{ (int) ($row->urgency_weight ?? 0) }} + {{ (int) ($row->failure_risk ?? 0) }}
+                                    · used {{ number_format((int) ($row->score ?? 0)) }}
                                 </span>
                                 <span class="block text-xs text-slate-600 mt-0.5">↓ {{ number_format($row->throughput_down_kbps ?? 0) }} · ↑ {{ number_format($row->throughput_up_kbps ?? 0) }} Kbps</span>
                             </td>

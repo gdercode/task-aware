@@ -9,13 +9,21 @@ use App\Services\AllocationPreviewService;
 use App\Services\ImportanceEngineService;
 use App\Services\TrafficDetectionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Tests\TestCase;
 
 class TaskAwareAllocationTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_importance_uses_role_task_and_urgency(): void
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Cache::store('database')->forget('bandwidth.allocation_state');
+    }
+
+    public function test_priority_is_the_sum_of_role_task_urgency_and_failure_risk(): void
     {
         Role::create([
             'slug' => 'guest',
@@ -26,45 +34,91 @@ class TaskAwareAllocationTest extends TestCase
         ]);
 
         $engine = app(ImportanceEngineService::class);
+        $weights = $engine->weights('student', 'REAL_TIME', $engine->urgencyFor('REAL_TIME'));
+        $realtime = $engine->calculate('student', 'REAL_TIME', $engine->urgencyFor('REAL_TIME'));
+        $bulk = $engine->calculate('student', 'BULK', $engine->urgencyFor('BULK'));
 
-        $realtime = $engine->calculate('student', 'REAL_TIME', $engine->urgencyFor('REAL_TIME'), true);
-        $bulk = $engine->calculate('student', 'BULK', $engine->urgencyFor('BULK'), true);
-
+        $this->assertSame(
+            $weights['role'] + $weights['task'] + $weights['urgency'] + $weights['failure'],
+            $weights['priority']
+        );
+        $this->assertSame($weights['priority'], $realtime);
+        $this->assertSame(5, $weights['failure']);
         $this->assertGreaterThan($bulk, $realtime);
         $this->assertSame(5, $engine->urgencyFor('REAL_TIME'));
         $this->assertSame(1, $engine->urgencyFor('BULK'));
-        $this->assertSame(0, $engine->calculate('guest', 'REAL_TIME', 5, true));
+        $this->assertSame(0, $engine->calculate('guest', 'REAL_TIME', 5));
     }
 
-    public function test_congestion_requires_competition_and_high_demand(): void
+    public function test_congestion_is_utilization_against_the_threshold(): void
     {
         $engine = app(ImportanceEngineService::class);
 
-        $this->assertFalse($engine->assessCongestion(10000, 10000, 1)['congested']);
-        $this->assertTrue($engine->assessCongestion(10000, 8000, 2)['congested']);
+        $this->assertTrue($engine->assessCongestion(10000, 8000, 1)['congested']);
+        $this->assertSame(80, $engine->assessCongestion(10000, 8000, 1)['utilization_percent']);
         $this->assertFalse($engine->assessCongestion(10000, 1000, 2)['congested']);
     }
 
-    public function test_congested_critical_task_outranks_higher_role_bulk_download(): void
+    public function test_congestion_response_waits_then_restores_gradually(): void
+    {
+        $engine = app(ImportanceEngineService::class);
+
+        $first = $engine->advanceAllocationState(90);
+        $this->assertSame(1, $first['streak']);
+        $this->assertSame('normal', $first['phase']);
+        $this->assertEqualsWithDelta(0.0, $first['pressure'], 0.001);
+
+        $second = $engine->advanceAllocationState(90);
+        $this->assertSame('protecting', $second['phase']);
+        $this->assertEqualsWithDelta(1.0, $second['pressure'], 0.001);
+
+        $adjusted = $engine->applyCongestionResponse(
+            [1 => 37, 2 => 51],
+            [1 => ['task' => 'REAL_TIME'], 2 => ['task' => 'BULK']],
+            $second['pressure'],
+        );
+        $this->assertGreaterThan($adjusted[2], $adjusted[1]);
+        $this->assertGreaterThan(0, $adjusted[2]);
+
+        $restore = $engine->advanceAllocationState(10);
+        $this->assertSame(0, $restore['streak']);
+        $this->assertSame('restoring', $restore['phase']);
+        $this->assertGreaterThan(0, $restore['pressure']);
+        $this->assertLessThan(1, $restore['pressure']);
+    }
+
+    public function test_sustained_congestion_raises_critical_tasks_then_restores(): void
     {
         [$student, $dean] = $this->pair('REAL_TIME', 'BULK');
 
         $calm = $this->allocate($student, $dean, 100, 100);
-        $busy = $this->allocate($student, $dean, 4000, 4000);
-
         $this->assertFalse($calm['congested']);
-        $this->assertTrue($busy['congested']);
+        $this->assertSame('normal', $calm['allocation_phase']);
+        $this->assertGreaterThan($this->share($calm, $student), $this->share($calm, $dean));
+
+        $pending = $this->allocate($student, $dean, 4000, 4000);
+        $this->assertTrue($pending['congested']);
+        $this->assertSame('normal', $pending['allocation_phase']);
+        $this->assertGreaterThan($this->share($pending, $student), $this->share($pending, $dean));
+
+        $busy = $this->allocate($student, $dean, 4000, 4000);
+        $this->assertSame('protecting', $busy['allocation_phase']);
         $this->assertGreaterThan($this->share($busy, $dean), $this->share($busy, $student));
-        $this->assertLessThanOrEqual(1000, $this->share($busy, $dean));
-        $this->assertGreaterThanOrEqual(512, $this->share($busy, $student));
+        $this->assertGreaterThan(0, $this->share($busy, $dean));
+        $this->assertSame(10000, $this->share($busy, $student) + $this->share($busy, $dean));
 
         $calmRatio = $this->share($calm, $student) / max(1, $this->share($calm, $dean));
         $busyRatio = $this->share($busy, $student) / max(1, $this->share($busy, $dean));
         $this->assertGreaterThan($calmRatio, $busyRatio);
-        $this->assertSame(10000, $this->share($busy, $student) + $this->share($busy, $dean));
+
+        $restoring = $this->allocate($student, $dean, 100, 100);
+        $this->assertSame('restoring', $restoring['allocation_phase']);
+        $this->assertFalse($restoring['congested']);
+        $this->assertGreaterThan($this->share($calm, $student), $this->share($restoring, $student));
+        $this->assertSame(10000, $this->share($restoring, $student) + $this->share($restoring, $dean));
     }
 
-    public function test_active_downloads_keep_enough_queue_to_reach_their_share(): void
+    public function test_share_is_the_priority_fraction_of_the_pool(): void
     {
         $dean = $this->makeUser('dean', '10.0.0.20', 'REAL_TIME');
         $lecturer = $this->makeUser('lecturer', '10.0.0.21', 'LEARNING');
@@ -81,9 +135,9 @@ class TaskAwareAllocationTest extends TestCase
             $lecturer->ip_address => true,
         ]);
 
+        $this->assertFalse($allocation['congested']);
         $this->assertGreaterThan($this->share($allocation, $lecturer), $this->share($allocation, $dean));
-        $this->assertGreaterThan(1500, $this->share($allocation, $dean));
-        $this->assertGreaterThan(16202, $this->share($allocation, $lecturer));
+        $this->assertSame($pool, $this->share($allocation, $dean) + $this->share($allocation, $lecturer));
     }
 
     public function test_same_task_still_favors_higher_institutional_role(): void
@@ -139,8 +193,11 @@ class TaskAwareAllocationTest extends TestCase
 
     public function test_dashboard_and_roles_pages_render(): void
     {
-        $this->get('/')->assertOk()->assertSee('Task-Aware Bandwidth');
+        $this->get('/')->assertOk()
+            ->assertSee('Task-Aware Bandwidth')
+            ->assertSee('U(t)');
         $this->get('/roles')->assertOk()->assertSee('institutional importance');
+        $this->get('/tasks')->assertOk()->assertSee('Failure risk');
     }
 
     public function test_task_page_shows_destinations_and_saved_priority_changes_the_share(): void

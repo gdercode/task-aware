@@ -12,6 +12,7 @@ class TaskPriority extends Model
         'name',
         'weight',
         'urgency',
+        'failure_risk',
         'is_critical',
         'match_terms',
         'sort_order',
@@ -24,6 +25,7 @@ class TaskPriority extends Model
         return [
             'weight' => 'integer',
             'urgency' => 'integer',
+            'failure_risk' => 'integer',
             'is_critical' => 'boolean',
             'sort_order' => 'integer',
         ];
@@ -66,6 +68,43 @@ class TaskPriority extends Model
         return static::allCached()
             ->mapWithKeys(fn (self $task) => [$task->slug => (int) $task->urgency])
             ->all();
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    public static function failureRisks(): array
+    {
+        return static::allCached()
+            ->mapWithKeys(fn (self $task) => [$task->slug => (int) $task->failure_risk])
+            ->all();
+    }
+
+    public function trafficClass(): string
+    {
+        if ($this->is_critical) {
+            return 'critical';
+        }
+
+        if (in_array($this->slug, ['BULK', 'STREAMING'], true)) {
+            return 'best-effort';
+        }
+
+        if (in_array($this->slug, ['COLLABORATION', 'DATA_TRANSFER'], true)) {
+            return 'important';
+        }
+
+        return 'normal';
+    }
+
+    public function classLabel(): string
+    {
+        return match ($this->trafficClass()) {
+            'critical' => 'Critical',
+            'important' => 'Important',
+            'best-effort' => 'Best-effort',
+            default => 'Normal',
+        };
     }
 
     /**

@@ -162,8 +162,17 @@ class RunBandwidthAllocator extends Command
         $snapshot->publishLive($detection, $poolMeasure, $interfaceTraffic, $allocation, $warning);
 
         $poolKbps = $allocation['pool_kbps'];
-        $condition = ($allocation['congested'] ?? false) ? 'congested' : 'stable';
-        $this->info('Report published: '.$engine->formatKbpsDisplay($poolKbps).' ['.$poolMeasure['source'].', '.$condition.' '.($allocation['utilization_percent'] ?? 0).'%]');
+        $phase = (string) ($allocation['allocation_phase'] ?? 'normal');
+        $this->info(sprintf(
+            'Report published: %s [%s, U(t)=%d%% Tc=%d%%, %d/%d intervals, %s]',
+            $engine->formatKbpsDisplay($poolKbps),
+            $poolMeasure['source'],
+            (int) ($allocation['utilization_percent'] ?? 0),
+            (int) ($allocation['congestion_threshold_percent'] ?? 0),
+            (int) ($allocation['allocation_streak'] ?? 0),
+            (int) ($allocation['allocation_intervals'] ?? 0),
+            $phase,
+        ));
 
         $availableBandwidth = $poolKbps > 0 ? $engine->formatLimit($poolKbps) : '0k/0k';
         $rowsByUser = $allocation['users']->keyBy(fn ($row) => $row->user->id);
@@ -293,7 +302,7 @@ class RunBandwidthAllocator extends Command
     protected function pause(): void
     {
         if ($this->pause) {
-            sleep(5);
+            sleep(max(1, (int) config('bandwidth.interval_seconds', 5)));
         }
     }
 }

@@ -30,6 +30,7 @@ class TaskPriorityController extends Controller
             'tasks.*.name' => ['required', 'string', 'max:80'],
             'tasks.*.weight' => ['required', 'integer', 'min:1', 'max:100'],
             'tasks.*.urgency' => ['required', 'integer', 'min:1', 'max:5'],
+            'tasks.*.failure_risk' => ['nullable', 'integer', 'min:1', 'max:5'],
             'tasks.*.match_terms' => ['nullable', 'string', 'max:1000'],
         ]);
 
@@ -45,6 +46,7 @@ class TaskPriorityController extends Controller
                 'name' => $row['name'],
                 'weight' => $row['weight'],
                 'urgency' => $row['urgency'],
+                'failure_risk' => $row['failure_risk'] ?? $task->failure_risk,
                 'is_critical' => $request->boolean('tasks.'.$id.'.is_critical'),
                 'match_terms' => TaskPriority::normalizeTerms($row['match_terms'] ?? null),
             ]);
@@ -54,6 +56,6 @@ class TaskPriorityController extends Controller
 
         return redirect()
             ->route('tasks.index')
-            ->with('success', 'Task priorities saved. A higher priority gets a larger share. Use Apply changes on the dashboard to send the new allocation to the router.');
+            ->with('success', 'Task priorities saved. Priority is role + task + urgency + failure risk. Use Apply changes on the dashboard to send the new allocation to the router.');
     }
 }

@@ -34,10 +34,7 @@
         <div class="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden">
             <div class="px-5 py-4 border-b border-slate-800">
                 <h2 class="text-lg font-semibold text-white">Who is using it</h2>
-                <p class="text-sm text-slate-400 mt-1">
-                    {{ count($pcs) }} {{ count($pcs) === 1 ? 'PC' : 'PCs' }} on the line.
-                    The percent is the share that priority allows. A lower priority cannot be given a larger share.
-                </p>
+                <p class="text-sm text-slate-400 mt-1">{{ count($pcs) }} PCs</p>
             </div>
 
             @if (! $live)

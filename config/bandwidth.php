@@ -60,6 +60,25 @@ return [
 
     'congestion_percent' => (int) env('BANDWIDTH_CONGESTION_PERCENT', 70),
 
+    /*
+    | Utilization must stay at or above the threshold for this many monitoring
+    | intervals before critical tasks are raised. When it falls below, the
+    | response steps back by restore_step each interval until shares are normal.
+    | At full response, critical priority is multiplied by (1 + boost) and
+    | best-effort priority keeps low_priority_keep of its base priority.
+    |
+    */
+
+    'congestion_intervals' => (int) env('BANDWIDTH_CONGESTION_INTERVALS', 2),
+
+    'restore_step' => (float) env('BANDWIDTH_RESTORE_STEP', 0.25),
+
+    'critical_priority_boost' => (float) env('BANDWIDTH_CRITICAL_PRIORITY_BOOST', 1),
+
+    'low_priority_keep' => (float) env('BANDWIDTH_LOW_PRIORITY_KEEP', 0.25),
+
+    'interval_seconds' => (int) env('BANDWIDTH_INTERVAL_SECONDS', 5),
+
     'calm_task_weight' => (float) env('BANDWIDTH_CALM_TASK_WEIGHT', 0.35),
 
     'congested_task_weight' => (float) env('BANDWIDTH_CONGESTED_TASK_WEIGHT', 0.65),
