@@ -23,15 +23,19 @@
     $utilization = (int) ($allocation['utilization_percent'] ?? 0);
     $threshold = (int) ($allocation['congestion_threshold_percent'] ?? 70);
     $receiving = $activeUsers->sortByDesc(fn ($row) => (int) ($row->share_kbps ?? 0))->values();
+    $blocked = $inactiveUsers->filter(fn ($row) => (bool) ($row->is_online ?? false))->values();
+    $offline = $inactiveUsers->reject(fn ($row) => (bool) ($row->is_online ?? false))->values();
     $listedUserIds = [];
     foreach ($receiving as $row) {
+        $listedUserIds[$row->user->id] = true;
+    }
+    foreach ($blocked as $row) {
         $listedUserIds[$row->user->id] = true;
     }
     $alsoUsing = [];
     if ($live) {
         foreach ($detection['devices'] ?? [] as $device) {
-            $moving = ($device['using_bandwidth'] ?? false) || (int) ($device['rate_kbps'] ?? 0) > 0;
-            if (! $moving || ! ($device['connected'] ?? false)) {
+            if (! ($device['connected'] ?? false)) {
                 continue;
             }
 
@@ -43,7 +47,7 @@
             $alsoUsing[] = $device;
         }
     }
-    $usingCount = $receiving->count() + count($alsoUsing);
+    $usingCount = $receiving->count();
 @endphp
 
 <div class="min-h-screen">
@@ -163,7 +167,7 @@
                 <p class="mt-1 text-2xl font-semibold text-white">{{ number_format($usingCount) }}</p>
                 <p class="text-xs text-slate-500 mt-1">
                     {{ number_format($stats['online_devices'] ?? 0) }} online
-                    · {{ number_format($inactiveUsers->count()) }} waiting
+                    · {{ number_format($blocked->count() + count($alsoUsing)) }} blocked
                 </p>
             </div>
         </div>
@@ -172,7 +176,7 @@
             <div class="px-5 py-4 border-b border-slate-800">
                 <h2 class="text-lg font-semibold text-white">Allocation</h2>
             </div>
-            @if ($receiving->isEmpty() && $alsoUsing === [])
+            @if ($receiving->isEmpty() && $blocked->isEmpty() && $alsoUsing === [])
                 <p class="px-5 py-10 text-sm text-slate-500 text-center">
                     {{ $live ? 'No device is receiving bandwidth.' : 'Allocations appear here once the report is live.' }}
                 </p>
@@ -233,6 +237,34 @@
                                     </td>
                                 </tr>
                             @endforeach
+                            @foreach ($blocked as $row)
+                                <tr class="hover:bg-slate-800/50">
+                                    <td class="px-5 py-3">
+                                        <a href="{{ route('allocation-reports', $row->user) }}" class="font-medium text-white hover:text-emerald-300">
+                                            {{ $row->user->name }}
+                                        </a>
+                                        <span class="block text-xs font-mono text-slate-500">{{ $row->user->ip_address }}</span>
+                                    </td>
+                                    <td class="px-5 py-3">
+                                        @include('partials.role-badge', ['role' => $row->user->role])
+                                    </td>
+                                    <td class="px-5 py-3 text-slate-200">
+                                        {{ $row->task_label ?? 'General use' }}
+                                    </td>
+                                    <td class="px-5 py-3 text-right font-mono text-slate-300">{{ isset($row->role_weight) ? (int) $row->role_weight : '—' }}</td>
+                                    <td class="px-5 py-3 text-right font-mono text-slate-300">{{ isset($row->task_weight) ? (int) $row->task_weight : '—' }}</td>
+                                    <td class="px-5 py-3 text-right font-mono text-slate-300">{{ isset($row->urgency_weight) ? (int) $row->urgency_weight : '—' }}</td>
+                                    <td class="px-5 py-3 text-right font-mono text-slate-300">{{ isset($row->failure_risk) ? (int) $row->failure_risk : '—' }}</td>
+                                    <td class="px-5 py-3 text-right font-mono text-amber-300">{{ number_format((int) ($row->score ?? 0)) }}</td>
+                                    <td class="px-5 py-3 text-right font-mono text-sky-300">
+                                        {{ number_format((int) ($row->throughput_total_kbps ?? 0)) }}
+                                    </td>
+                                    <td class="px-5 py-3 text-right font-mono text-slate-500">0</td>
+                                    <td class="px-5 py-3">
+                                        <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/20 text-red-300">Blocked</span>
+                                    </td>
+                                </tr>
+                            @endforeach
                             @foreach ($alsoUsing as $device)
                                 <tr class="hover:bg-slate-800/50">
                                     <td class="px-5 py-3">
@@ -253,7 +285,7 @@
                                     </td>
                                     <td class="px-5 py-3 text-right font-mono text-slate-500">0</td>
                                     <td class="px-5 py-3">
-                                        <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/20 text-red-300">Internet blocked</span>
+                                        <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/20 text-red-300">Blocked</span>
                                         @if (empty($device['user_id']) && \App\Models\Role::defaultSlug())
                                             <form method="POST" action="{{ route('devices.register') }}" class="mt-2">
                                                 @csrf
@@ -277,11 +309,11 @@
             @endif
         </section>
 
-        @if ($inactiveUsers->isNotEmpty())
+        @if ($offline->isNotEmpty())
             <section class="rounded-xl border border-slate-800 bg-slate-900 px-5 py-4">
                 <h2 class="text-sm font-medium text-slate-300">Not receiving bandwidth</h2>
                 <ul class="mt-3 flex flex-wrap gap-2">
-                    @foreach ($inactiveUsers as $row)
+                    @foreach ($offline as $row)
                         <li class="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-800/60 px-3 py-1 text-xs text-slate-300">
                             <span class="text-white">{{ $row->user->name }}</span>
                             <span class="text-slate-500">{{ $row->offline_reason ?? 'Not using' }}</span>

@@ -444,6 +444,11 @@ class AllocationSnapshotService
             $inactive->push((object) [
                 'user' => $user,
                 'is_online' => (bool) ($row?->is_online ?? false),
+                'role_weight' => $row->role_weight ?? null,
+                'task_weight' => $row->task_weight ?? null,
+                'urgency_weight' => $row->urgency_weight ?? null,
+                'failure_risk' => $row->failure_risk ?? null,
+                'score' => $row->score ?? 0,
                 'share_kbps' => 0,
                 'kbps_display' => '0 Kbps',
                 'activity_status' => $status,
