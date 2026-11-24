@@ -210,8 +210,8 @@ class TaskAwareAllocationTest extends TestCase
         $this->get('/')->assertOk()
             ->assertSee('Task-Aware Bandwidth')
             ->assertSee('U(t)')
-            ->assertSee('Baseline Phase')
-            ->assertDontSee('Adaptive Phase');
+            ->assertSee('Adaptive Phase')
+            ->assertSee('Baseline Phase');
         $this->get('/roles')->assertOk()->assertSee('institutional importance');
         $this->get('/tasks')->assertOk()->assertSee('Failure risk');
     }

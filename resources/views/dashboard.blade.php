@@ -76,6 +76,9 @@
                         Allocator stopped
                     </span>
                 @endif
+                <span class="inline-flex items-center px-4 py-2 rounded-lg border border-slate-700 bg-slate-950 text-sm font-medium text-white">
+                    {{ ($studyPhase ?? 'adaptive') === 'baseline' ? 'Baseline Phase' : 'Adaptive Phase' }}
+                </span>
                 @if (($studyPhase ?? 'adaptive') === 'baseline')
                     <form method="POST" action="{{ route('study-phase.switch') }}" onsubmit="this.querySelector('button').disabled = true; this.querySelector('button').textContent = 'Applying...';">
                         @csrf
