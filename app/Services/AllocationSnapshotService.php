@@ -190,8 +190,8 @@ class AllocationSnapshotService
     }
 
     /**
-     * On a page refresh, ping receiving devices that are not moving traffic.
-     * A device that does not answer is removed and the remaining shares are sent to the router.
+     * On a page refresh, ping devices that are not moving traffic.
+     * A blocked PC stays listed only while it answers. One that does not is taken off the list.
      */
     public function recalculateIfUnreachable(MikrotikService $mikrotik): void
     {
@@ -201,9 +201,10 @@ class AllocationSnapshotService
         }
 
         $unreachable = false;
+        $checked = [];
 
         foreach ($snapshot['allocation']['users'] ?? [] as $row) {
-            if (empty($row['is_online']) || (int) ($row['share_kbps'] ?? 0) <= 0) {
+            if (empty($row['is_online'])) {
                 continue;
             }
 
@@ -216,9 +217,38 @@ class AllocationSnapshotService
                 continue;
             }
 
-            if ($mikrotik->answersPing($user->ip_address) === false) {
+            $ip = $mikrotik->normalizeIp($user->ip_address);
+            if ($ip === '' || isset($checked[$ip])) {
+                continue;
+            }
+
+            $checked[$ip] = true;
+            if ($mikrotik->answersPing($ip) === false) {
                 $unreachable = true;
                 break;
+            }
+        }
+
+        if (! $unreachable) {
+            foreach ($snapshot['detection']['devices'] ?? [] as $device) {
+                if (! ($device['connected'] ?? false) || ! empty($device['user_id'])) {
+                    continue;
+                }
+
+                if ((int) ($device['rate_kbps'] ?? 0) > 0) {
+                    continue;
+                }
+
+                $ip = $mikrotik->normalizeIp($device['ip'] ?? null);
+                if ($ip === '' || isset($checked[$ip])) {
+                    continue;
+                }
+
+                $checked[$ip] = true;
+                if ($mikrotik->answersPing($ip) === false) {
+                    $unreachable = true;
+                    break;
+                }
             }
         }
 
