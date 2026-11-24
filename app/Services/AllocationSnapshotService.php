@@ -179,6 +179,7 @@ class AllocationSnapshotService
             'interfaceTraffic' => $connected ? $snapshot['interface_traffic'] : [],
             'reportState' => $snapshot['state'],
             'reportUpdatedAt' => $measuredAt,
+            'studyPhase' => app(ImportanceEngineService::class)->studyPhase(),
         ];
     }
 
@@ -292,6 +293,7 @@ class AllocationSnapshotService
             'capacity_source' => 'observed',
             'competing_users' => 0,
             'congestion_threshold_percent' => (int) config('bandwidth.congestion_percent', 70),
+            'study_phase' => 'adaptive',
             'allocation_phase' => 'normal',
             'allocation_pressure' => 0,
             'allocation_streak' => 0,

@@ -60,7 +60,15 @@ class AllocationPreviewService
         }
 
         $congestion = $this->engine->assessCongestion($poolKbps, $throughputKbps, $competingUsers);
-        $decision = $this->engine->advanceAllocationState($congestion['utilization_percent']);
+        $studyPhase = $this->engine->studyPhase();
+        $decision = $studyPhase === 'baseline'
+            ? [
+                'phase' => 'baseline',
+                'pressure' => 0.0,
+                'streak' => 0,
+                'required_intervals' => (int) config('bandwidth.congestion_intervals', 2),
+            ]
+            : $this->engine->advanceAllocationState($congestion['utilization_percent']);
         $entries = $this->buildEntries($monitoredUsers, $onlineIps, $activeIps, $flowsByUser, $congestion['congested']);
 
         $allocatableScores = collect($entries)
@@ -77,7 +85,9 @@ class AllocationPreviewService
             ];
         }
         $baseShares = $this->engine->distributePool($allocatableScores, $poolKbps);
-        $priorities = $this->engine->applyCongestionResponse($allocatableScores, $context, $decision['pressure']);
+        $priorities = $studyPhase === 'baseline'
+            ? array_map(fn ($score) => ((int) $score) > 0 ? 1 : 0, $allocatableScores)
+            : $this->engine->applyCongestionResponse($allocatableScores, $context, $decision['pressure']);
         foreach ($entries as $userId => $entry) {
             $entries[$userId]['adjusted_score'] = (int) ($priorities[$userId] ?? 0);
         }
@@ -127,6 +137,7 @@ class AllocationPreviewService
             'allocation_pressure' => $decision['pressure'],
             'allocation_streak' => $decision['streak'],
             'allocation_intervals' => $decision['required_intervals'],
+            'study_phase' => $studyPhase,
         ] + $usageSummary;
     }
 

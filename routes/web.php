@@ -25,6 +25,9 @@ Route::get('/', [DashboardController::class, 'index'])->name('dashboard');
 Route::post('/apply-changes', [DashboardController::class, 'applyChanges'])
     ->name('bandwidth.apply');
 
+Route::post('/study-phase', [DashboardController::class, 'switchPhase'])
+    ->name('study-phase.switch');
+
 Route::get('/live-use', [DashboardController::class, 'liveUse'])->name('live-use');
 
 Route::post('/mikrotik-settings', [DashboardController::class, 'updateMikrotik'])

@@ -16,6 +16,7 @@
         <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
             <p class="text-xs font-medium uppercase tracking-wider text-emerald-400">Live report</p>
             <h1 class="text-xl sm:text-2xl font-semibold text-white">PCs on the internet</h1>
+            <p class="text-sm text-slate-400 mt-1">{{ ($studyPhase ?? 'adaptive') === 'baseline' ? 'Baseline' : 'Adaptive' }}</p>
             @if ($live && $updatedAt)
                 <p class="text-sm text-slate-400 mt-1">Updated {{ $updatedAt->diffForHumans() }}. This page refreshes every 3 seconds.</p>
             @endif

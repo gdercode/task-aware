@@ -21,6 +21,7 @@ class TaskAwareAllocationTest extends TestCase
         parent::setUp();
 
         Cache::store('database')->forget('bandwidth.allocation_state');
+        Cache::store('database')->forget('bandwidth.study_phase');
     }
 
     public function test_priority_is_the_sum_of_role_task_urgency_and_failure_risk(): void
@@ -118,6 +119,19 @@ class TaskAwareAllocationTest extends TestCase
         $this->assertSame(10000, $this->share($restoring, $student) + $this->share($restoring, $dean));
     }
 
+    public function test_baseline_gives_every_active_device_the_same_share(): void
+    {
+        [$student, $dean] = $this->pair('REAL_TIME', 'BULK');
+        app(ImportanceEngineService::class)->setStudyPhase('baseline');
+
+        $allocation = $this->allocate($student, $dean, 4000, 4000);
+
+        $this->assertSame('baseline', $allocation['study_phase']);
+        $this->assertSame('baseline', $allocation['allocation_phase']);
+        $this->assertEqualsWithDelta($this->share($allocation, $student), $this->share($allocation, $dean), 1);
+        $this->assertSame(10000, $this->share($allocation, $student) + $this->share($allocation, $dean));
+    }
+
     public function test_share_is_the_priority_fraction_of_the_pool(): void
     {
         $dean = $this->makeUser('dean', '10.0.0.20', 'REAL_TIME');
@@ -195,7 +209,9 @@ class TaskAwareAllocationTest extends TestCase
     {
         $this->get('/')->assertOk()
             ->assertSee('Task-Aware Bandwidth')
-            ->assertSee('U(t)');
+            ->assertSee('U(t)')
+            ->assertSee('Baseline Phase')
+            ->assertDontSee('Adaptive Phase');
         $this->get('/roles')->assertOk()->assertSee('institutional importance');
         $this->get('/tasks')->assertOk()->assertSee('Failure risk');
     }

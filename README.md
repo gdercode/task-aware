@@ -2,6 +2,8 @@
 
 The dashboard reports the live allocation. Roles, tasks, and users are the inputs.
 
+The header shows one phase button. Baseline gives every active device the same share. Adaptive uses Pi and Bi. The click writes the queues on the router and reloads the page.
+
 ## Output
 
 | Field | Meaning |

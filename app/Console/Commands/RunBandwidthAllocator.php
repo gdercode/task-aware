@@ -163,10 +163,12 @@ class RunBandwidthAllocator extends Command
 
         $poolKbps = $allocation['pool_kbps'];
         $phase = (string) ($allocation['allocation_phase'] ?? 'normal');
+        $studyPhase = (string) ($allocation['study_phase'] ?? 'adaptive');
         $this->info(sprintf(
-            'Report published: %s [%s, U(t)=%d%% Tc=%d%%, %d/%d intervals, %s]',
+            'Report published: %s [%s, %s, U(t)=%d%% Tc=%d%%, %d/%d intervals, %s]',
             $engine->formatKbpsDisplay($poolKbps),
             $poolMeasure['source'],
+            $studyPhase,
             (int) ($allocation['utilization_percent'] ?? 0),
             (int) ($allocation['congestion_threshold_percent'] ?? 0),
             (int) ($allocation['allocation_streak'] ?? 0),

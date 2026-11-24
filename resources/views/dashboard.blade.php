@@ -22,8 +22,6 @@
     $restoring = $live && $phase === 'restoring';
     $utilization = (int) ($allocation['utilization_percent'] ?? 0);
     $threshold = (int) ($allocation['congestion_threshold_percent'] ?? 70);
-    $streak = (int) ($allocation['allocation_streak'] ?? 0);
-    $intervals = (int) ($allocation['allocation_intervals'] ?? 2);
     $receiving = $activeUsers->sortByDesc(fn ($row) => (int) ($row->share_kbps ?? 0))->values();
     $listedUserIds = [];
     foreach ($receiving as $row) {
@@ -78,12 +76,23 @@
                         Allocator stopped
                     </span>
                 @endif
-                <form method="POST" action="{{ route('bandwidth.apply') }}" onsubmit="this.querySelector('button').disabled = true; this.querySelector('button').textContent = 'Applying...';">
-                    @csrf
-                    <button type="submit" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white text-sm font-medium transition-colors">
-                        Apply changes
-                    </button>
-                </form>
+                @if (($studyPhase ?? 'adaptive') === 'baseline')
+                    <form method="POST" action="{{ route('study-phase.switch') }}" onsubmit="this.querySelector('button').disabled = true; this.querySelector('button').textContent = 'Applying...';">
+                        @csrf
+                        <input type="hidden" name="phase" value="adaptive">
+                        <button type="submit" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white text-sm font-medium transition-colors">
+                            Adaptive Phase
+                        </button>
+                    </form>
+                @else
+                    <form method="POST" action="{{ route('study-phase.switch') }}" onsubmit="this.querySelector('button').disabled = true; this.querySelector('button').textContent = 'Applying...';">
+                        @csrf
+                        <input type="hidden" name="phase" value="baseline">
+                        <button type="submit" class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 disabled:opacity-60 text-white text-sm font-medium transition-colors">
+                            Baseline Phase
+                        </button>
+                    </form>
+                @endif
             </div>
         </div>
     </header>
@@ -121,12 +130,15 @@
                 'border-amber-500/40 bg-amber-500/10' => $congested || $restoring,
                 'border-slate-800 bg-slate-900' => ! $congested && ! $restoring,
             ])>
-                <p class="text-sm text-slate-400">Network</p>
+                <p class="text-sm text-slate-400">Phase</p>
                 <p @class(['mt-1 text-2xl font-semibold', 'text-amber-200' => $congested || $restoring, 'text-white' => ! $congested && ! $restoring])>
-                    {{ $live ? ($allocation['congestion_label'] ?? 'Stable') : '—' }}
+                    {{ ($studyPhase ?? 'adaptive') === 'baseline' ? 'Baseline' : 'Adaptive' }}
                 </p>
                 <p class="text-xs text-slate-500 mt-1">
-                    U(t) {{ $live ? $utilization.'%' : '—' }} · Tc {{ $threshold }}% · {{ $live ? $streak.'/'.$intervals : '—' }}
+                    U(t) {{ $live ? $utilization.'%' : '—' }} · Tc {{ $threshold }}%
+                    @if ($live && ($studyPhase ?? 'adaptive') === 'adaptive')
+                        · {{ $allocation['congestion_label'] ?? 'Stable' }}
+                    @endif
                 </p>
             </div>
             <div class="rounded-xl border border-slate-800 bg-slate-900 p-5">

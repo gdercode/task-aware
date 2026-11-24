@@ -48,6 +48,36 @@ class DashboardController extends Controller
             ->with('success', 'Changes applied. The dashboard and the router now use the current devices, roles, and allocations.');
     }
 
+    public function switchPhase(Request $request, ImportanceEngineService $engine, AllocationSnapshotService $snapshot): RedirectResponse
+    {
+        $phase = $request->validate([
+            'phase' => ['required', 'in:baseline,adaptive'],
+        ])['phase'];
+
+        $engine->setStudyPhase($phase);
+        set_time_limit(180);
+
+        try {
+            Artisan::call('bandwidth:run', ['--once' => true]);
+        } catch (\Throwable $e) {
+            return redirect()
+                ->route('dashboard')
+                ->with('error', 'The phase was saved, but the router was not updated. '.$e->getMessage());
+        }
+
+        if (! $snapshot->isLive()) {
+            return redirect()
+                ->route('dashboard')
+                ->with('error', 'The phase was saved, but the router is not reachable.');
+        }
+
+        $label = $phase === 'baseline' ? 'Baseline' : 'Adaptive';
+
+        return redirect()
+            ->route('dashboard')
+            ->with('success', $label.' phase is now on the router.');
+    }
+
     public function liveUse(AllocationSnapshotService $snapshot): View
     {
         $report = $snapshot->forDashboard();
@@ -115,6 +145,7 @@ class DashboardController extends Controller
             'updatedAt' => $report['reportUpdatedAt'],
             'totalKbps' => $totalKbps,
             'pcs' => $pcs,
+            'studyPhase' => $report['studyPhase'] ?? 'adaptive',
         ]);
     }
 

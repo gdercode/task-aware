@@ -184,6 +184,20 @@ class ImportanceEngineService
         return $state;
     }
 
+    public function studyPhase(): string
+    {
+        $phase = Cache::store('database')->get('bandwidth.study_phase', 'adaptive');
+
+        return $phase === 'baseline' ? 'baseline' : 'adaptive';
+    }
+
+    public function setStudyPhase(string $phase): void
+    {
+        $phase = $phase === 'baseline' ? 'baseline' : 'adaptive';
+        Cache::store('database')->forever('bandwidth.study_phase', $phase);
+        Cache::store('database')->forget('bandwidth.allocation_state');
+    }
+
     /**
      * While the congestion response is active, raise critical priorities and
      * shrink best-effort priorities. Best-effort tasks keep a fraction of Pi.
