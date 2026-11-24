@@ -169,12 +169,33 @@ class MikrotikService
         $rows = $this->getClient()->query($query)->read();
 
         foreach ($rows as $row) {
-            if ((int) ($row['received'] ?? 0) > 0 || isset($row['time'])) {
+            if ($this->pingReplyReceived($row)) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /**
+     * A timeout row can still contain a time field. Only a real reply counts.
+     *
+     * @param  array<string, mixed>  $row
+     */
+    protected function pingReplyReceived(array $row): bool
+    {
+        $status = strtolower(trim((string) ($row['status'] ?? '')));
+        if (in_array($status, ['timeout', 'host unreachable', 'net unreachable', 'ttl exceeded'], true)) {
+            return false;
+        }
+
+        if ((int) ($row['received'] ?? 0) > 0 && (int) ($row['packet-loss'] ?? 0) < 100) {
+            return true;
+        }
+
+        $time = strtolower(trim((string) ($row['time'] ?? '')));
+
+        return $time !== '' && ! str_contains($time, 'timeout') && $status === '';
     }
 
     public function normalizeIp(?string $ip): string

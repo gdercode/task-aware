@@ -147,28 +147,10 @@ class RunBandwidthAllocator extends Command
         $poolMeasure['kbps'] = max($poolMeasure['kbps'], $peakKbps);
         $interfaceTraffic = $mikrotik->interfaceTrafficSnapshot($monitor, $interfaceError ? null : $interfaceKbps);
         $throughput = $mikrotik->measureUserThroughputKbps($connections);
-        $reachable = $deviceDetection->withoutUnreachable($onlineIps, $throughput);
+        $reachable = $deviceDetection->confirmOnline($onlineIps, $throughput, $detection['devices']);
         $onlineIps = $reachable['online_ips'];
         foreach ($reachable['dropped'] as $label) {
             $this->line($label.' did not answer — removed');
-        }
-        foreach ($detection['devices'] ?? [] as $index => $device) {
-            if (! ($device['connected'] ?? false) || ! empty($device['user_id'])) {
-                continue;
-            }
-
-            $ip = $mikrotik->normalizeIp($device['ip'] ?? null);
-            if ($ip === '' || (int) ($device['rate_kbps'] ?? 0) > 0) {
-                continue;
-            }
-
-            if ($mikrotik->answersPing($ip) !== false) {
-                continue;
-            }
-
-            unset($onlineIps[$ip]);
-            $detection['devices'][$index]['connected'] = false;
-            $this->line($ip.' did not answer — removed from blocked');
         }
         foreach (array_keys($activeIps) as $ip) {
             if (! isset($onlineIps[$ip])) {

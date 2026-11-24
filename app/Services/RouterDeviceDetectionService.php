@@ -56,37 +56,15 @@ class RouterDeviceDetectionService
         $devices = $this->devicesOnRouter($sources);
         $onlineIps = [];
         $ipSources = [];
-        $stillOnUntil = now()->subMinutes(2);
 
         foreach ($devices as $device) {
             $ip = (string) ($device['ip'] ?? '');
-            if ($ip === '') {
-                continue;
-            }
-
-            $seenAt = $device['last_seen_on_lan_at'] ?? null;
-            $seenRecently = $seenAt !== null && \Carbon\Carbon::parse($seenAt)->gte($stillOnUntil);
-            $onNetwork = ($device['connected'] ?? false)
-                || ($device['using_internet'] ?? false)
-                || ($device['using_bandwidth'] ?? false)
-                || $seenRecently;
-
-            if (! $onNetwork) {
+            if ($ip === '' || ! ($device['connected'] ?? false)) {
                 continue;
             }
 
             $onlineIps[$ip] = true;
             $ipSources[$ip] = $device['via'] ?? [];
-        }
-
-        foreach ($sources['connections']['details'] ?? [] as $ip => $detail) {
-            if (! is_string($ip) || ! $this->isLanClientIp($ip)) {
-                continue;
-            }
-
-            if ((int) ($detail['rate_bps'] ?? 0) > 0) {
-                $onlineIps[$ip] = true;
-            }
         }
 
         $users = User::whereNotNull('ip_address')->orderBy('name')->get()->map(function (User $user) use ($onlineIps, $ipSources) {
@@ -123,22 +101,114 @@ class RouterDeviceDetectionService
      */
     public function withoutUnreachable(array $onlineIps, array $throughput): array
     {
+        $devices = [];
+
+        return $this->confirmOnline($onlineIps, $throughput, $devices);
+    }
+
+    /**
+     * Keep a PC only when its ARP entry is live and it is moving traffic, or when it answers a ping.
+     * A stale ARP entry or an old sighting is not enough.
+     *
+     * @param  array<string, true>  $onlineIps
+     * @param  array<int, array{total_kbps?: int}>  $throughput
+     * @param  list<array<string, mixed>>  $devices
+     * @return array{online_ips: array<string, true>, dropped: list<string>}
+     */
+    public function confirmOnline(array $onlineIps, array $throughput, array &$devices): array
+    {
         $dropped = [];
+        $indexByIp = [];
+
+        foreach ($devices as $index => $device) {
+            $ip = (string) ($device['ip'] ?? '');
+            if ($ip !== '') {
+                $indexByIp[$ip] = $index;
+            }
+        }
+
+        $checked = [];
 
         foreach (User::whereNotNull('ip_address')->get() as $user) {
             $ip = $this->mikrotik->normalizeIp($user->ip_address);
-            if ($ip === '' || ! isset($onlineIps[$ip])) {
+            if ($ip === '') {
                 continue;
             }
 
-            if ((int) ($throughput[$user->id]['total_kbps'] ?? 0) > 0) {
+            $checked[$ip] = true;
+            $index = $indexByIp[$ip] ?? null;
+            $device = $index !== null ? $devices[$index] : null;
+            $onRouter = is_array($device)
+                ? (bool) ($device['on_router'] ?? isset($onlineIps[$ip]))
+                : isset($onlineIps[$ip]);
+            $live = is_array($device) && (bool) ($device['connected'] ?? false);
+            $used = (int) ($throughput[$user->id]['total_kbps'] ?? 0);
+
+            if (! $onRouter && ! isset($onlineIps[$ip])) {
+                unset($onlineIps[$ip]);
+
+                continue;
+            }
+
+            if ($live && $used > 0) {
+                $onlineIps[$ip] = true;
+
                 continue;
             }
 
             $answers = $this->mikrotik->answersPing($ip);
+            if ($answers === true) {
+                $onlineIps[$ip] = true;
+                if ($index !== null) {
+                    $devices[$index]['connected'] = true;
+                }
+
+                continue;
+            }
+
+            if ($answers === null && $live) {
+                $onlineIps[$ip] = true;
+
+                continue;
+            }
+
+            unset($onlineIps[$ip]);
+            if ($index !== null) {
+                $devices[$index]['connected'] = false;
+            }
             if ($answers === false) {
-                unset($onlineIps[$ip]);
                 $dropped[] = $user->name.' '.$ip;
+            }
+        }
+
+        foreach ($devices as $index => $device) {
+            if (! empty($device['user_id']) || ! ($device['on_router'] ?? false)) {
+                continue;
+            }
+
+            $ip = (string) ($device['ip'] ?? '');
+            if ($ip === '' || isset($checked[$ip])) {
+                continue;
+            }
+
+            if (($device['connected'] ?? false) && (int) ($device['rate_kbps'] ?? 0) > 0) {
+                $onlineIps[$ip] = true;
+
+                continue;
+            }
+
+            $answers = $this->mikrotik->answersPing($ip);
+            if ($answers === true) {
+                $onlineIps[$ip] = true;
+                $devices[$index]['connected'] = true;
+
+                continue;
+            }
+
+            unset($onlineIps[$ip]);
+            $devices[$index]['connected'] = false;
+            if ($answers === false) {
+                $dropped[] = $ip;
             }
         }
 
@@ -258,6 +328,9 @@ class RouterDeviceDetectionService
             }
 
             $rateBps = (int) ($sources['connections']['details'][$ip]['rate_bps'] ?? 0);
+            $arpStatus = strtolower((string) ($sources['arp']['details'][$ip]['status'] ?? ''));
+            $arpLive = isset($sources['arp']['details'][$ip])
+                && in_array($arpStatus, ['', 'reachable', 'permanent', 'delay', 'probe'], true);
 
             $devices[] = [
                 'ip' => $ip,
@@ -267,7 +340,9 @@ class RouterDeviceDetectionService
                 'using_internet' => isset($internet[$ip]),
                 'registered_name' => $matched?->name,
                 'user_id' => $matched?->id,
-                'connected' => true,
+                'connected' => $arpLive,
+                'on_router' => true,
+                'arp_status' => $arpStatus,
                 'using_bandwidth' => $rateBps > 0,
                 'rate_kbps' => (int) ceil($rateBps / 1000),
             ];
@@ -337,6 +412,7 @@ class RouterDeviceDetectionService
                 'registered_name' => $matched?->name,
                 'user_id' => $matched?->id,
                 'connected' => false,
+                'on_router' => false,
                 'using_bandwidth' => false,
                 'rate_kbps' => 0,
                 'last_seen_on_lan_at' => $seenAt,
@@ -395,6 +471,7 @@ class RouterDeviceDetectionService
                 'ip' => $ip,
                 'mac' => $this->normalizeMac($row['mac-address'] ?? null),
                 'interface' => trim((string) ($row['interface'] ?? '')) ?: null,
+                'status' => $status,
             ];
         });
     }
