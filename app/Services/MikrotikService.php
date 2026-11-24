@@ -123,6 +123,60 @@ class MikrotikService
         return $ip !== '' && isset($onlineIps[$ip]);
     }
 
+    /**
+     * True when the host answers, false when it does not, null when the router cannot run the check.
+     * ARP ping is used first so a PC that blocks ICMP is still counted while it is switched on.
+     */
+    public function answersPing(?string $ip): ?bool
+    {
+        $ip = $this->normalizeIp($ip);
+        if ($ip === '' || filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
+            return false;
+        }
+
+        try {
+            return $this->pingOnce($ip, true);
+        } catch (ConnectException $e) {
+            $this->resetClient();
+
+            return null;
+        } catch (\Throwable) {
+            $this->resetClient();
+
+            try {
+                return $this->pingOnce($ip, false);
+            } catch (ConnectException $e) {
+                $this->resetClient();
+
+                return null;
+            } catch (\Throwable) {
+                $this->resetClient();
+
+                return null;
+            }
+        }
+    }
+
+    protected function pingOnce(string $ip, bool $arp): bool
+    {
+        $query = new Query('/ping');
+        $query->equal('address', $ip);
+        $query->equal('count', '1');
+        if ($arp) {
+            $query->equal('arp-ping', 'yes');
+        }
+
+        $rows = $this->getClient()->query($query)->read();
+
+        foreach ($rows as $row) {
+            if ((int) ($row['received'] ?? 0) > 0 || isset($row['time'])) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public function normalizeIp(?string $ip): string
     {
         return trim((string) $ip);

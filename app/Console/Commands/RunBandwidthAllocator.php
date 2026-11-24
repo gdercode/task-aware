@@ -147,6 +147,16 @@ class RunBandwidthAllocator extends Command
         $poolMeasure['kbps'] = max($poolMeasure['kbps'], $peakKbps);
         $interfaceTraffic = $mikrotik->interfaceTrafficSnapshot($monitor, $interfaceError ? null : $interfaceKbps);
         $throughput = $mikrotik->measureUserThroughputKbps($connections);
+        $reachable = $deviceDetection->withoutUnreachable($onlineIps, $throughput);
+        $onlineIps = $reachable['online_ips'];
+        foreach ($reachable['dropped'] as $label) {
+            $this->line($label.' did not answer — share released');
+        }
+        foreach (array_keys($activeIps) as $ip) {
+            if (! isset($onlineIps[$ip])) {
+                unset($activeIps[$ip]);
+            }
+        }
         $allocation = $allocationPreview->build($poolMeasure['kbps'], $onlineIps, $throughput, $activeIps);
         $sharesByUser = $allocation['users']->keyBy(fn ($row) => $row->user->id);
         foreach ($detection['devices'] ?? [] as $index => $device) {

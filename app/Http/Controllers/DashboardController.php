@@ -20,8 +20,10 @@ class DashboardController extends Controller
 {
     private const ALLOCATION_CYCLE_SECONDS = 120;
 
-    public function index(AllocationSnapshotService $snapshot): View
+    public function index(AllocationSnapshotService $snapshot, MikrotikService $mikrotik): View
     {
+        $snapshot->recalculateIfUnreachable($mikrotik);
+
         return view('dashboard', $snapshot->forDashboard());
     }
 
@@ -78,8 +80,9 @@ class DashboardController extends Controller
             ->with('success', $label.' phase is now on the router.');
     }
 
-    public function liveUse(AllocationSnapshotService $snapshot): View
+    public function liveUse(AllocationSnapshotService $snapshot, MikrotikService $mikrotik): View
     {
+        $snapshot->recalculateIfUnreachable($mikrotik);
         $report = $snapshot->forDashboard();
         $live = ($report['reportState'] ?? '') === 'live';
         $allocation = $report['allocation'];

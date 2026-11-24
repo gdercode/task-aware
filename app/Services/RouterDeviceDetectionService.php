@@ -114,6 +114,41 @@ class RouterDeviceDetectionService
     }
 
     /**
+     * A host with no traffic must answer a ping. Otherwise it is treated as switched off
+     * and left out of the share.
+     *
+     * @param  array<string, true>  $onlineIps
+     * @param  array<int, array{total_kbps?: int}>  $throughput
+     * @return array{online_ips: array<string, true>, dropped: list<string>}
+     */
+    public function withoutUnreachable(array $onlineIps, array $throughput): array
+    {
+        $dropped = [];
+
+        foreach (User::whereNotNull('ip_address')->get() as $user) {
+            $ip = $this->mikrotik->normalizeIp($user->ip_address);
+            if ($ip === '' || ! isset($onlineIps[$ip])) {
+                continue;
+            }
+
+            if ((int) ($throughput[$user->id]['total_kbps'] ?? 0) > 0) {
+                continue;
+            }
+
+            $answers = $this->mikrotik->answersPing($ip);
+            if ($answers === false) {
+                unset($onlineIps[$ip]);
+                $dropped[] = $user->name.' '.$ip;
+            }
+        }
+
+        return [
+            'online_ips' => $onlineIps,
+            'dropped' => $dropped,
+        ];
+    }
+
+    /**
      * Devices present on a LAN interface (ARP), not the WAN uplink, hotspot-only clients, or remote sites.
      *
      * @param  array<string, array{count: int, error: ?string, ips: list<string>, details?: array<string, array<string, mixed>>}>  $sources

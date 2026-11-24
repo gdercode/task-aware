@@ -8,6 +8,7 @@ use App\Models\MikrotikSetting;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 
 class AllocationSnapshotService
@@ -186,6 +187,47 @@ class AllocationSnapshotService
     public function isLive(): bool
     {
         return $this->read()['state'] === 'live';
+    }
+
+    /**
+     * On a page refresh, ping receiving devices that are not moving traffic.
+     * A device that does not answer is removed and the remaining shares are sent to the router.
+     */
+    public function recalculateIfUnreachable(MikrotikService $mikrotik): void
+    {
+        $snapshot = $this->read();
+        if (($snapshot['state'] ?? '') !== 'live') {
+            return;
+        }
+
+        $unreachable = false;
+
+        foreach ($snapshot['allocation']['users'] ?? [] as $row) {
+            if (empty($row['is_online']) || (int) ($row['share_kbps'] ?? 0) <= 0) {
+                continue;
+            }
+
+            if ((int) ($row['throughput_total_kbps'] ?? 0) > 0) {
+                continue;
+            }
+
+            $user = User::find($row['user_id'] ?? null);
+            if (! $user) {
+                continue;
+            }
+
+            if ($mikrotik->answersPing($user->ip_address) === false) {
+                $unreachable = true;
+                break;
+            }
+        }
+
+        if (! $unreachable) {
+            return;
+        }
+
+        set_time_limit(180);
+        Artisan::call('bandwidth:run', ['--once' => true]);
     }
 
     /**

@@ -119,6 +119,29 @@ class TaskAwareAllocationTest extends TestCase
         $this->assertSame(10000, $this->share($restoring, $student) + $this->share($restoring, $dean));
     }
 
+    public function test_a_silent_pc_that_does_not_answer_loses_its_share(): void
+    {
+        $student = $this->makeUser('student', '10.0.0.22', 'REAL_TIME');
+        $dean = $this->makeUser('dean', '10.0.0.20', 'BULK');
+
+        $this->mock(\App\Services\MikrotikService::class, function ($mock) use ($student, $dean) {
+            $mock->shouldReceive('normalizeIp')->andReturnUsing(fn ($ip) => trim((string) $ip));
+            $mock->shouldReceive('answersPing')->with($student->ip_address)->andReturn(false);
+            $mock->shouldReceive('answersPing')->with($dean->ip_address)->andReturn(true);
+        });
+
+        $checked = app(\App\Services\RouterDeviceDetectionService::class)->withoutUnreachable([
+            $student->ip_address => true,
+            $dean->ip_address => true,
+        ], [
+            $dean->id => ['total_kbps' => 0],
+        ]);
+
+        $this->assertArrayNotHasKey($student->ip_address, $checked['online_ips']);
+        $this->assertArrayHasKey($dean->ip_address, $checked['online_ips']);
+        $this->assertSame([$student->name.' '.$student->ip_address], $checked['dropped']);
+    }
+
     public function test_baseline_gives_every_active_device_the_same_share(): void
     {
         [$student, $dean] = $this->pair('REAL_TIME', 'BULK');
