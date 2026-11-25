@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Str;
 
 class TaskPriority extends Model
 {
@@ -116,6 +117,25 @@ class TaskPriority extends Model
             ->filter(fn (self $task) => $task->is_critical)
             ->pluck('slug')
             ->all();
+    }
+
+    public static function slugFromName(string $name): string
+    {
+        $base = Str::upper(str_replace('-', '_', Str::slug($name)));
+        if ($base === '') {
+            $base = 'TASK';
+        }
+
+        $taken = static::query()->pluck('slug')->map(fn ($slug) => strtolower((string) $slug))->all();
+        $slug = $base;
+        $suffix = 2;
+
+        while (in_array(strtolower($slug), $taken, true)) {
+            $slug = $base.'_'.$suffix;
+            $suffix++;
+        }
+
+        return $slug;
     }
 
     public static function labelFor(string $slug): ?string

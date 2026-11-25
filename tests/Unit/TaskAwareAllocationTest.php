@@ -285,6 +285,38 @@ class TaskAwareAllocationTest extends TestCase
         $this->assertGreaterThan($this->share($after, $video), $this->share($after, $learning));
     }
 
+    public function test_a_new_task_is_matched_from_its_destination_words(): void
+    {
+        $this->post('/tasks', [
+            'name' => 'Campus portal',
+            'weight' => 6,
+            'urgency' => 3,
+            'failure_risk' => 2,
+            'is_critical' => '1',
+            'match_terms' => 'portal.university.edu, intranet',
+        ])->assertRedirect(route('tasks.index'));
+
+        $task = \App\Models\TaskPriority::query()->where('name', 'Campus portal')->firstOrFail();
+        $this->assertSame('CAMPUS_PORTAL', $task->slug);
+        $this->assertTrue($task->is_critical);
+        $this->assertSame(6, $task->weight);
+        $this->assertGreaterThan(7, $task->sort_order);
+
+        $detector = app(TrafficDetectionService::class);
+        $this->assertSame('CAMPUS_PORTAL', $detector->classify('portal.university.edu:443'));
+        $this->assertSame('STREAMING', $detector->classify('youtube.com:443'));
+
+        $this->get('/tasks')->assertOk()->assertSee('Campus portal')->assertSee('Add task');
+
+        $this->from('/tasks')->post('/tasks', [
+            'name' => 'Empty words',
+            'weight' => 2,
+            'urgency' => 2,
+            'failure_risk' => 2,
+            'match_terms' => ' , ',
+        ])->assertRedirect('/tasks')->assertSessionHasErrors('match_terms');
+    }
+
     public function test_router_priority_follows_importance_score(): void
     {
         $priorities = app(ImportanceEngineService::class)->queuePriorities([

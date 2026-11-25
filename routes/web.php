@@ -44,6 +44,7 @@ Route::resource('users', UserController::class)->except(['show']);
 Route::resource('roles', RoleController::class)->except(['show']);
 
 Route::get('/tasks', [TaskPriorityController::class, 'index'])->name('tasks.index');
+Route::post('/tasks', [TaskPriorityController::class, 'store'])->name('tasks.store');
 Route::put('/tasks', [TaskPriorityController::class, 'update'])->name('tasks.update');
 
 Route::get('/api/allocation-reports', function () {
